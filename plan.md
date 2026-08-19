@@ -164,7 +164,7 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
 
 ## Phase 5: LangGraph Workflow
 
-- [ ] Define state schema (`src/graph.py`):
+- [x] Define state schema (`src/graph.py`):
   ```python
   from typing_extensions import TypedDict
   from langchain_core.documents import Document
@@ -176,11 +176,11 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
       answer: str
       retry_count: int
   ```
-- [ ] Implement nodes (`src/nodes.py`):
+- [x] Implement nodes (`src/nodes.py`):
   - `retrieve_node(state)` — calls retriever, populates `retrieved_docs`
   - `grade_node(state)` — (optional) LLM or heuristic filters irrelevant docs
   - `generate_node(state)` — builds prompt from graded docs, calls LLM, returns `answer`
-- [ ] Wire graph:
+- [x] Wire graph:
   ```python
   from langgraph.graph import StateGraph, END
 
@@ -214,7 +214,7 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
 
 ## Phase 6: Prompt & Generation
 
-- [ ] Design prompt template (`src/prompts.py`):
+- [x] Design prompt template (`src/prompts.py`):
   ```python
   RAG_PROMPT = """Answer the question using ONLY the context below.
   If the context doesn't contain the answer, say so — don't guess.

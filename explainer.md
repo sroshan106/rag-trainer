@@ -109,16 +109,19 @@ invisible to the other.
 ## Layout
 
 ```
-src/loaders.py      read source files into Documents
-src/splitter.py     cut Documents into chunks
-src/vectorstore.py  embed chunks, read/write pgvector
-src/nodes.py        retrieve / grade / generate node functions
-src/graph.py        state schema, graph wiring, entrypoint
-src/prompts.py      prompt templates
-data/raw            source documents
-data/processed      derived artifacts
+src/ingestion/loaders.py    read source files into Documents
+src/ingestion/splitter.py   cut Documents into chunks
+src/ingestion/pipeline.py   load -> split -> embed -> store, run: python -m src.ingestion.pipeline
+src/vectorstore/store.py    embed chunks, read/write pgvector
+src/rag/nodes.py            retrieve / grade / generate node functions
+src/rag/prompts.py          prompt templates
+src/rag/graph.py            state schema, graph wiring, entrypoint
+data/raw                    source documents
+data/processed               derived artifacts
 ```
 
-`src/graph.py` currently holds a Phase 1 smoke check that verifies the app container can
-reach Postgres and Ollama and that the pgvector extension is enabled. The real graph
-replaces it in Phase 5.
+Domains: `ingestion` (raw docs -> chunks -> vectorstore), `vectorstore` (embedding + pgvector
+access, shared by ingestion and rag), `rag` (the LangGraph retrieve/grade/generate workflow).
+
+`src/rag/graph.py` wires the retrieve → grade → generate LangGraph workflow and exposes
+`ask(query)`. Run via `docker compose run app python -m src.rag.graph "your question"`.

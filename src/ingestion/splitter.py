@@ -20,7 +20,7 @@ def split_documents(
 
 
 if __name__ == "__main__":
-    from src.loaders import load_documents
+    from src.ingestion.loaders import load_documents
 
     docs = load_documents("data/documents.csv")
     chunks = split_documents(docs)
