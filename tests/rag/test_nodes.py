@@ -38,7 +38,13 @@ class FakeLLM:
         return FakeResponse(self.content)
 
 
+def _dense_only(monkeypatch):
+    """Pin retrieval to the dense path, which needs no live full-text index."""
+    monkeypatch.setenv("RAG_HYBRID", "false")
+
+
 def test_retrieve_node_populates_docs(monkeypatch):
+    _dense_only(monkeypatch)
     doc = Document(page_content="a", metadata={})
     fake_store = FakeVectorstore([(doc, 0.9)])
     monkeypatch.setattr(nodes, "_get_vectorstore", lambda: fake_store)
@@ -51,6 +57,7 @@ def test_retrieve_node_populates_docs(monkeypatch):
 
 
 def test_retrieve_node_stamps_relevance_score(monkeypatch):
+    _dense_only(monkeypatch)
     doc = Document(page_content="a", metadata={})
     monkeypatch.setattr(nodes, "_get_vectorstore", lambda: FakeVectorstore([(doc, 0.73)]))
 
@@ -165,3 +172,58 @@ def test_generate_node_fallback_has_empty_sources():
     result = nodes.generate_node({"query": "q", "graded_docs": []})
 
     assert result["sources"] == []
+
+
+def _lexical(content, score, source="a.txt"):
+    """A doc as the full-text half of hybrid retrieval returns it."""
+    return Document(
+        page_content=content,
+        metadata={"source": source, nodes.LEXICAL_KEY: score},
+    )
+
+
+def test_retrieve_node_fuses_lexical_hits(monkeypatch):
+    dense = Document(page_content="dense only", metadata={})
+    shared = Document(page_content="in both", metadata={})
+    monkeypatch.setattr(
+        nodes, "_get_vectorstore", lambda: FakeVectorstore([(dense, 0.7), (shared, 0.6)])
+    )
+    monkeypatch.setattr(
+        nodes.hybrid.lexical,
+        "search",
+        lambda query, k, connection=None: [(Document(page_content="in both"), 0.9)],
+    )
+
+    docs = nodes.retrieve_node({"query": "q"})["retrieved_docs"]
+
+    # Present in both lists, so RRF ranks it above the higher-scoring dense hit.
+    assert docs[0].page_content == "in both"
+    assert docs[0].metadata[nodes.LEXICAL_KEY] == 0.9
+    assert docs[0].metadata[nodes.SCORE_KEY] == 0.6
+
+
+def test_grade_node_keeps_lexical_hit_below_dense_floor():
+    """The case dense-only grading got wrong: a real match scoring under the floor."""
+    docs = [_lexical("exact phrase match", 0.02)]
+    docs[0].metadata[nodes.SCORE_KEY] = nodes.RELEVANCE_FLOOR - 0.1
+
+    result = nodes.grade_node({"retrieved_docs": docs})
+
+    assert result["graded_docs"] == docs
+
+
+def test_grade_node_refuses_when_no_lexical_and_dense_below_floor():
+    docs = [_scored("weak", nodes.RELEVANCE_FLOOR - 0.1)]
+
+    assert nodes.grade_node({"retrieved_docs": docs})["graded_docs"] == []
+
+
+def test_grade_node_dense_cutoff_ignores_lexical_hits():
+    """A strong lexical hit must not raise the bar for dense-only documents."""
+    strong_lexical = _lexical("phrase", 0.9)
+    strong_lexical.metadata[nodes.SCORE_KEY] = 0.99
+    dense = _scored("dense", 0.7)
+
+    graded = nodes.grade_node({"retrieved_docs": [strong_lexical, dense]})["graded_docs"]
+
+    assert dense in graded

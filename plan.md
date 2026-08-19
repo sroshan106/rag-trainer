@@ -288,12 +288,12 @@ is not reliable with the current model — treat as open item, not blocking MVP.
 
 ## Phase 7: Optional Enhancements (post-MVP)
 
-- [ ] **Re-ranking** — Cohere rerank or cross-encoder model on top-k results before generation (improves precision when k is large)
-- [ ] **Hybrid search** — combine BM25 keyword search + semantic search (catches exact-match terms embeddings miss)
+- [ ] **Re-ranking** — Cohere rerank or cross-encoder model on top-k results before generation (improves precision when k is large). Deferred: `k=5` leaves almost nothing to reorder, and a cross-encoder needs VRAM the 4GB card does not have spare.
+- [x] **Hybrid search** — Postgres full-text (`ts_rank_cd`) fused with dense retrieval by Reciprocal Rank Fusion. `src/vectorstore/lexical.py` + `src/vectorstore/hybrid.py`, on by default, `RAG_HYBRID=false` to compare. No re-ingest: the tsvector is a generated column over the text pgvector already stored.
 - [ ] **Multi-turn memory** — add conversation history to state, rewrite follow-up queries with context
 - [ ] **Query rewriting/expansion** — LLM rephrases vague queries before retrieval
 - [ ] **Streaming responses** — stream `generate_node` output token-by-token
-- [ ] **Web UI** — Streamlit (fast prototype) or FastAPI + frontend (production)
+- [x] **Web UI** — FastAPI (`src/api/`) + React/Vite (`ui/`), with Ask, Ingest, System, and Benchmark views. Phases B and core C of `ui_plan.md`; Phase E (hosted providers, credentials, spend caps) deliberately not built.
 
 ---
 
@@ -320,14 +320,23 @@ cites *only* relevant sources, and that an off-topic query refuses instead of gu
 
 ### Measured baseline
 
-Benchmark, 120 labeled questions, `llama3.2:3b` + `nomic-embed-text`, `k=5`, floor 0.6 /
-ratio 0.8:
+Benchmark, 120 labeled questions, `llama3.2:3b` + `nomic-embed-text`, `k=5`. The current
+configuration is hybrid retrieval at floor 0.56 / ratio 0.9; the two earlier columns are
+kept because the comparison is the point.
 
-| Question set | n | recall@5 | mean answer overlap | pass rate (overlap ≥ 0.3) |
+| Question set | metric | dense, 0.6/0.8 | dense, 0.48/0.9 | **hybrid, 0.56/0.9** |
 |---|---|---|---|---|
-| single-passage | 40 | 0.80 | 0.16 | 0.20 |
-| multi-passage | 40 | 0.80 | 0.20 | 0.25 |
-| no-answer | 40 | — | — | correct refusal 0.62 |
+| single-passage (n=40) | recall@5 | 0.80 | 0.80 | **0.88** |
+| | mean overlap | 0.16 | 0.39 | **0.43** |
+| | pass rate | 0.20 | 0.47 | **0.57** |
+| multi-passage (n=40) | recall@5 | 0.80 | 0.80 | **0.82** |
+| | mean overlap | 0.20 | 0.31 | **0.30** |
+| | pass rate | 0.25 | 0.42 | **0.35** |
+| no-answer (n=40) | correct refusal | 0.62 | 0.20 | **0.35** |
+| **all 120** | **questions right** | **0.357** | **0.363** | **0.423** |
+
+The last row weights each suite's rate by its question count, so a configuration cannot win
+by refusing everything or by answering everything.
 
 Latency, 12 queries (mixed hits and refusals), single-threaded:
 
@@ -340,8 +349,15 @@ Latency, 12 queries (mixed hits and refusals), single-threaded:
 
 **Reading these numbers:**
 
-- **Retrieval is the healthy part.** recall@5 of 0.80 means the labeled document is in the
-  top 5 four times out of five. Retrieval is not the bottleneck.
+- **Hybrid retrieval moved the ceiling; the threshold never could.** Sliding the cutoff from
+  0.6 to 0.48 traded refusal for answers and landed at 0.363 against 0.357 — statistically
+  nothing. Adding full-text search raised recall@5 from 0.80 to 0.88, which no cutoff value
+  can do, and the combined score followed it to 0.423.
+- **Correct refusal is still the weak metric**, and it is now the honest cost of the change:
+  0.35 against the original 0.62. The floor was doing double duty as the refusal mechanism,
+  and a lower floor gives that up. Full-text misses supply part of it back — an off-topic
+  query matches no tsvector at all — but generation still answers when handed marginal
+  context.
 - **Answer overlap is a weak metric, not necessarily a weak answer.** It counts shared
   keywords against the reference answer after stopword removal, so a correct answer phrased
   differently scores low. Treat 0.16–0.20 as a regression baseline to compare future runs
@@ -355,9 +371,17 @@ Latency, 12 queries (mixed hits and refusals), single-threaded:
 - **Latency is entirely generation.** Retrieval is ~90ms; grading is free. The p50 of 97ms
   reflects that half the sample refuses and never calls the LLM at all. The 24.7s max is a
   long-context generation — worth capping with `num_predict` if it matters.
-- **Baseline caveat:** these were run before tracing was added. Tracing only observes, so
-  results should be unchanged, but the first re-run establishes the post-instrumentation
-  baseline properly.
+- **Overlap partly rewards verbosity.** A configuration that refuses less emits more words
+  and collects more accidental keyword matches. Some of the gain from 0.16 to 0.43 is real
+  (the right chunks now reach the model) and some is that artifact; the combined-score row
+  exists to keep that honest.
+- **The operating point was swept, not guessed.** `tests/benchmark/run_sweep.py` walked
+  floors 0.44–0.60 at 12 questions/suite: combined 0.361, 0.361, 0.417, 0.528, 0.500. The
+  peak at 0.56 is what is configured. At 12 questions a suite the resolution is 0.083, so
+  treat the shape as real and the exact peak as approximate.
+- **Latency numbers predate hybrid retrieval** and were measured before tracing existed.
+  Retrieval now issues a second query per ask; the measured cost is ~250ms added to a ~90ms
+  dense-only retrieve, which is still negligible against generation.
 
 ---
 
@@ -391,7 +415,9 @@ Everything else in this plan is complete. What is deliberately not done:
 |---|---|---|
 | App container does not ingest | `docker compose up` starts the app against an empty vectorstore; ingestion is a manual `python -m src.ingestion.pipeline`. Deferred by decision — the UI will own ingestion. | `ui_plan.md`, Ingest view |
 | pgvector index tuning (ivfflat/hnsw) | 223 chunks. Sequential scan is faster than an index at this size; retrieval is ~90ms. | Revisit past a few thousand rows |
-| Inline `(source: ...)` citations | `llama3.2:3b` does not honour the instruction at this model size. Worked around in code via `src/rag/citations.py`, which is deterministic and arguably better. | Needs a larger model |
+| Inline `(source: ...)` citations | `llama3.2:3b` ignores the instruction when handed five chunks, though it does honour it once hybrid grading narrows the context to one or two. Still worked around deterministically in `src/rag/citations.py`. | Unreliable below a larger model |
 | `qwen2.5:7b` evaluation | ~5GB pull, tight on 4GB VRAM. Not attempted — needs explicit go-ahead. | Would likely lift the 0.62 refusal rate |
 | LLM-as-judge answer scoring | Keyword overlap is a regression signal, not an accuracy measure. | Phase 8 follow-up |
-| Phase 7 enhancements | Post-MVP by design. Query rewriting is the one that would justify reinstating a retry loop. | `ui_plan.md` covers the UI item |
+| Re-ranking, multi-turn memory, streaming | Post-MVP. Streaming and multi-turn need the UI's chat surface, which is not built; re-ranking needs VRAM the card lacks. | Phase 7 |
+| Query rewriting | The remaining Phase 7 item with real upside, and the prerequisite for reinstating a retry loop. Overlaps hybrid search, so it should be measured against the new 0.423 baseline rather than the old one. | Phase 7 |
+| `ui_plan.md` Phases D and E | Traces, Latency, Index views; then hosted providers, credential storage, and spend caps. Phase E is the only part that can spend money. | `ui_plan.md` |

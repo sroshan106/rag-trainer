@@ -10,3 +10,10 @@ python-dotenv
 pypdf
 requests
 pytest
+fastapi
+uvicorn[standard]
+psutil
+nvidia-ml-py
+python-multipart
+sse-starlette
+httpx

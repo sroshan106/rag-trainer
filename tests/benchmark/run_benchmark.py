@@ -10,11 +10,12 @@ replaying every LLM call. The cache key includes the grading thresholds, so
 re-running after a threshold change re-evaluates rather than reusing stale
 answers.
 
-Run: python -m tests.benchmark.run_benchmark [--workers N] [--no-cache]
+Run: python -m tests.benchmark.run_benchmark [--workers N] [--sample N] [--no-cache]
 """
 
 import argparse
 import csv
+import random
 import re
 import statistics
 import sys
@@ -27,10 +28,17 @@ from tests.benchmark.cache import CACHE_DIR, ResultCache, config_fingerprint
 
 DATA_DIR = Path(__file__).parent / "data"
 
-# Measured on a 4GB card with llama3.2:3b: 8 concurrent requests finished a
-# sample batch in 12.9s against 22.1s at 4. Raise only alongside VRAM -- past
-# the point where Ollama runs out of parallel slots, requests just queue.
-DEFAULT_WORKERS = 8
+# Measured on a 4GB card with llama3.2:3b, using real benchmark questions
+# (~3.5k-token prompts): 5.3s/question at 1 worker, 2.2s at 2, 2.3s at 4. Gains
+# stop at 2 because each parallel slot needs its own KV cache and the card has
+# room for very few at this prompt size -- at 8 the run thrashed and made no
+# progress at all. Short prompts scale much further; do not tune this on them.
+DEFAULT_WORKERS = 4
+
+# Sampling seed. Fixed so --sample draws the same subset every run: two
+# configurations are only comparable if they answered the same questions, and
+# a resampled subset would move the metric on its own.
+SAMPLE_SEED = 20250819
 
 REFUSAL_PATTERNS = (
     "don't have enough context",
@@ -63,9 +71,14 @@ def _answer_overlap(expected: str, actual: str) -> float:
     return len(exp_kw & act_kw) / len(exp_kw)
 
 
-def _load_csv(name: str) -> list[dict]:
+def _load_csv(name: str, sample: int | None = None) -> list[dict]:
     with open(DATA_DIR / name, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+        rows = list(csv.DictReader(f))
+    if sample is None or sample >= len(rows):
+        return rows
+    # Sort the sampled indices so cached rows stay in a stable order across runs.
+    picked = sorted(random.Random(SAMPLE_SEED).sample(range(len(rows)), sample))
+    return [rows[i] for i in picked]
 
 
 def _run(query: str) -> dict:
@@ -103,13 +116,17 @@ def eval_answerable(
     name: str,
     workers: int = DEFAULT_WORKERS,
     cache: ResultCache | None = None,
+    sample: int | None = None,
     overlap_threshold: float = 0.3,
 ) -> dict:
-    rows = _load_csv(name)
+    rows = _load_csv(name, sample)
     if not rows:
         return {"name": name, "n": 0}
 
-    cache = cache or ResultCache(CACHE_DIR / "unused.jsonl", enabled=False)
+    # ``is None``, not truthiness: an empty ResultCache has len() == 0 and is
+    # therefore falsy, which would silently swap a real cache for the dummy.
+    if cache is None:
+        cache = ResultCache(CACHE_DIR / "unused.jsonl", enabled=False)
     results = _run_suite(name, rows, workers, cache)
 
     recalls = [
@@ -135,12 +152,16 @@ def eval_no_answer(
     name: str,
     workers: int = DEFAULT_WORKERS,
     cache: ResultCache | None = None,
+    sample: int | None = None,
 ) -> dict:
-    rows = _load_csv(name)
+    rows = _load_csv(name, sample)
     if not rows:
         return {"name": name, "n": 0}
 
-    cache = cache or ResultCache(CACHE_DIR / "unused.jsonl", enabled=False)
+    # ``is None``, not truthiness: an empty ResultCache has len() == 0 and is
+    # therefore falsy, which would silently swap a real cache for the dummy.
+    if cache is None:
+        cache = ResultCache(CACHE_DIR / "unused.jsonl", enabled=False)
     results = _run_suite(name, rows, workers, cache)
 
     refused = sum(
@@ -153,6 +174,25 @@ def eval_no_answer(
         "n": len(rows),
         "correct_refusal_rate": refused / len(rows),
     }
+
+
+def run_all(
+    workers: int = DEFAULT_WORKERS,
+    sample: int | None = None,
+    use_cache: bool = True,
+) -> list[dict]:
+    """Run all three suites and return their metric dicts.
+
+    The programmatic entry point -- ``main`` is a thin CLI wrapper over this so
+    the API can run a benchmark without going through argv or stdout.
+    """
+    cache_path = CACHE_DIR / f"{config_fingerprint()}.jsonl"
+    with ResultCache(cache_path, enabled=use_cache) as cache:
+        return [
+            eval_answerable("single_passage_answer_questions.csv", workers, cache, sample),
+            eval_answerable("multi_passage_answer_questions.csv", workers, cache, sample),
+            eval_no_answer("no_answer_questions.csv", workers, cache, sample),
+        ]
 
 
 def _report(results: list[dict]) -> None:
@@ -168,6 +208,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     parser.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        help="evaluate N questions per suite instead of all (fixed seed)",
+    )
+    parser.add_argument(
         "--no-cache",
         action="store_true",
         help="ignore and do not write cached answers",
@@ -175,23 +221,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     fingerprint = config_fingerprint()
-    cache_path = CACHE_DIR / f"{fingerprint}.jsonl"
-    print(f"config {fingerprint}, {args.workers} workers")
+    scope = f"sample {args.sample}/suite" if args.sample else "full"
+    print(f"config {fingerprint}, {args.workers} workers, {scope}")
     if not args.no_cache:
-        print(f"cache {cache_path}")
+        print(f"cache {CACHE_DIR / f'{fingerprint}.jsonl'}")
 
-    with ResultCache(cache_path, enabled=not args.no_cache) as cache:
-        try:
-            results = [
-                eval_answerable("single_passage_answer_questions.csv", args.workers, cache),
-                eval_answerable("multi_passage_answer_questions.csv", args.workers, cache),
-                eval_no_answer("no_answer_questions.csv", args.workers, cache),
-            ]
-        except KeyboardInterrupt:
-            # Every answer completed before the interrupt is already flushed;
-            # re-running picks up from there.
-            print(f"\ninterrupted -- {len(cache)} answers cached, re-run to resume")
-            return 130
+    try:
+        results = run_all(args.workers, args.sample, use_cache=not args.no_cache)
+    except KeyboardInterrupt:
+        # Every answer completed before the interrupt is already flushed;
+        # re-running picks up from there.
+        print("\ninterrupted -- completed answers cached, re-run to resume")
+        return 130
 
     _report(results)
     return 0

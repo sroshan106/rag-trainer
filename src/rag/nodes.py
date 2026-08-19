@@ -5,9 +5,11 @@ import threading
 
 from langchain_ollama import ChatOllama
 
+from src.config import env_flag
 from src.observability import tracing
 from src.rag.citations import citations_enabled, collect_sources
 from src.rag.prompts import RAG_PROMPT, format_context
+from src.vectorstore import hybrid
 from src.vectorstore.store import load_vectorstore
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -17,12 +19,18 @@ RETRIEVE_K = 5
 # Absolute floor: a chunk this dissimilar is noise no matter what else came
 # back — this is what lets an off-topic query refuse instead of citing the
 # five least-bad chunks in the collection.
-RELEVANCE_FLOOR = float(os.environ.get("RAG_RELEVANCE_FLOOR", "0.48"))
+RELEVANCE_FLOOR = float(os.environ.get("RAG_RELEVANCE_FLOOR", "0.56"))
 # Relative cutoff: drop chunks far weaker than the best hit, so a query with
 # one strong match doesn't drag along filler that happens to clear the floor.
 RELEVANCE_RATIO = float(os.environ.get("RAG_RELEVANCE_RATIO", "0.9"))
 
-SCORE_KEY = "relevance_score"
+SCORE_KEY = hybrid.DENSE_SCORE_KEY
+LEXICAL_KEY = hybrid.LEXICAL_SCORE_KEY
+
+
+def hybrid_enabled() -> bool:
+    """Fuse full-text results with the dense ones. Set RAG_HYBRID=false to compare."""
+    return env_flag("RAG_HYBRID", default=True)
 
 _vectorstore = None
 _llm = None
@@ -52,16 +60,25 @@ def _get_llm():
 
 @tracing.traced("retrieve")
 def retrieve_node(state: dict) -> dict:
-    scored = _get_vectorstore().similarity_search_with_relevance_scores(
-        state["query"], k=RETRIEVE_K
-    )
-    docs = []
-    for doc, score in scored:
-        doc.metadata[SCORE_KEY] = score
-        docs.append(doc)
+    store = _get_vectorstore()
+    if hybrid_enabled():
+        docs = hybrid.retrieve(store, state["query"], k=RETRIEVE_K)
+    else:
+        docs = []
+        for doc, score in store.similarity_search_with_relevance_scores(
+            state["query"], k=RETRIEVE_K
+        ):
+            doc.metadata[SCORE_KEY] = score
+            docs.append(doc)
+
     tracing.detail(
         k=RETRIEVE_K,
-        scores=[round(s, 4) for _, s in scored],
+        hybrid=hybrid_enabled(),
+        scores=[
+            None if d.metadata.get(SCORE_KEY) is None else round(d.metadata[SCORE_KEY], 4)
+            for d in docs
+        ],
+        lexical_hits=sum(1 for d in docs if LEXICAL_KEY in d.metadata),
         sources=[d.metadata.get("source") for d in docs],
     )
     return {"retrieved_docs": docs}
@@ -70,18 +87,48 @@ def retrieve_node(state: dict) -> dict:
 @tracing.traced("grade")
 def grade_node(state: dict) -> dict:
     docs = [d for d in state["retrieved_docs"] if d.page_content.strip()]
-    scores = [d.metadata.get(SCORE_KEY, 0.0) for d in docs]
-    if not scores:
+    if not docs:
         tracing.detail(kept=0, dropped=len(state["retrieved_docs"]), cutoff=None)
         return {"graded_docs": []}
 
-    cutoff = max(RELEVANCE_FLOOR, max(scores) * RELEVANCE_RATIO)
-    graded = [d for d in docs if d.metadata.get(SCORE_KEY, 0.0) >= cutoff]
+    # A full-text hit is kept unconditionally. Postgres only returns rows whose
+    # tsvector actually matches the query, so a lexical hit is direct evidence
+    # that the chunk contains the query's terms — and an off-topic query gets an
+    # empty lexical list rather than a weak one, which is what preserves the
+    # refusal path without adding a second threshold to tune.
+    lexical = [d for d in docs if LEXICAL_KEY in d.metadata]
+    dense_only = [d for d in docs if LEXICAL_KEY not in d.metadata]
+    dense_scores = [
+        d.metadata[SCORE_KEY]
+        for d in dense_only
+        if d.metadata.get(SCORE_KEY) is not None
+    ]
+
+    cutoff = None
+    graded_dense = []
+    if dense_scores:
+        cutoff = max(RELEVANCE_FLOOR, max(dense_scores) * RELEVANCE_RATIO)
+        graded_dense = [
+            d for d in dense_only if (d.metadata.get(SCORE_KEY) or 0.0) >= cutoff
+        ]
+
+    # Rebuild in fused-rank order rather than concatenating the two groups.
+    keep = {id(d) for d in lexical} | {id(d) for d in graded_dense}
+    graded = [d for d in docs if id(d) in keep]
+
     tracing.detail(
-        cutoff=round(cutoff, 4),
-        # Which bound actually decided the cutoff — the absolute floor or the
-        # ratio against the best hit. The distinction explains most refusals.
-        bound="floor" if RELEVANCE_FLOOR >= max(scores) * RELEVANCE_RATIO else "ratio",
+        cutoff=None if cutoff is None else round(cutoff, 4),
+        # Which bound decided the dense cutoff — the absolute floor or the ratio
+        # against the best hit. The distinction explains most refusals.
+        bound=None
+        if not dense_scores
+        else (
+            "floor"
+            if RELEVANCE_FLOOR >= max(dense_scores) * RELEVANCE_RATIO
+            else "ratio"
+        ),
+        kept_lexical=len(lexical),
+        kept_dense=len(graded_dense),
         kept=len(graded),
         dropped=len(state["retrieved_docs"]) - len(graded),
     )

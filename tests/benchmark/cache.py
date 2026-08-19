@@ -15,21 +15,26 @@ import json
 import threading
 from pathlib import Path
 
-from src.rag.nodes import MODEL, RELEVANCE_FLOOR, RELEVANCE_RATIO, RETRIEVE_K
+from src.rag import nodes
 from src.vectorstore.store import EMBED_MODEL
 
 CACHE_DIR = Path(__file__).parent / ".cache"
 
 
 def config_fingerprint() -> str:
-    """Short hash of every setting that could change a cached answer."""
+    """Short hash of every setting that could change a cached answer.
+
+    Read off the module rather than imported by name: the sweep rebinds the
+    cutoffs between grid points, and imported copies would leave every point
+    sharing one cache file.
+    """
     payload = json.dumps(
         {
-            "model": MODEL,
+            "model": nodes.MODEL,
             "embed_model": EMBED_MODEL,
-            "k": RETRIEVE_K,
-            "floor": RELEVANCE_FLOOR,
-            "ratio": RELEVANCE_RATIO,
+            "k": nodes.RETRIEVE_K,
+            "floor": nodes.RELEVANCE_FLOOR,
+            "ratio": nodes.RELEVANCE_RATIO,
         },
         sort_keys=True,
     )

@@ -65,7 +65,12 @@ This sits between "single local desktop app" and "public multi-tenant SaaS":
 
 This is arguably the deployment shape most consistent with the project's current "local-only, privacy-first" architecture decision (see `rag_architecture_decisions` memory) — it keeps that property while still adding multi-user support, which idea 4 (public SaaS) trades away.
 
-## 6. Hybrid retrieval: BM25 + dense with Reciprocal Rank Fusion
+## 6. Hybrid retrieval: BM25 + dense with Reciprocal Rank Fusion — **implemented**
+
+> Built as `src/vectorstore/lexical.py` + `src/vectorstore/hybrid.py`. recall@5 rose from
+> 0.80 to 0.88 (single-passage) and the combined benchmark score from 0.357 to 0.423. See
+> `plan.md` "Measured baseline". The rest of this section is kept as the reasoning that led
+> there.
 
 Dense retrieval alone is weak on literal-phrase lookups, and the grading thresholds that compensate for it are fragile. Measured on the current 223-chunk corpus with `nomic-embed-text`:
 
@@ -81,15 +86,23 @@ On-topic and off-topic scores are separated by roughly 0.07, and for the "I love
 
 BM25 over the same chunks, same query, ranks the correct chunk first with a wide margin (16.86 vs 13.01 for the runner-up) — precisely because the query is a literal-phrase lookup (`"I love you"`, `"ran off"`), which is dense retrieval's weak spot and lexical search's strength.
 
-### Proposed shape
+### Shape as built
 
-Postgres already hosts the vectors via `PGVector`, so the lexical half needs no new infrastructure:
+Postgres already hosts the vectors via `PGVector`, so the lexical half needed no new infrastructure:
 
 1. Add a `tsvector` column over chunk text plus a GIN index on the existing collection table.
 2. Run `ts_rank_cd` full-text search alongside the vector search, retrieving top-k from each independently.
 3. Fuse the two ranked lists with Reciprocal Rank Fusion (`score = Σ 1/(60 + rank)`), rather than trying to normalize a cosine score against a BM25 score — the scales aren't comparable, ranks are.
 
-The payoff is that `grade_node` stops depending on absolute cosine thresholds. Grading becomes rank-based (keep the top-n fused results, refuse when neither retriever produced a confident hit), which removes the per-corpus threshold tuning that `RELEVANCE_FLOOR`/`RELEVANCE_RATIO` currently require.
+The payoff landed differently than expected. `grade_node` did not become purely rank-based:
+it keeps every full-text hit unconditionally and applies the cosine cutoff only to
+dense-only documents. That works because Postgres returns *nothing* when no query term
+matches, so an off-topic query yields an empty lexical list rather than a weak one — the
+refusal signal comes from the miss, not from a second threshold.
+
+`RELEVANCE_FLOOR` therefore still exists and still needs a corpus-specific value (swept to
+0.56, see `tests/benchmark/run_sweep.py`). It governs a narrower decision than before, but
+the hope of deleting it outright was not realised.
 
 ### Tested and rejected
 
