@@ -232,12 +232,17 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
   from langchain_ollama import ChatOllama
   llm = ChatOllama(model="llama3.2:3b", base_url=OLLAMA_BASE_URL)
   ```
-- [ ] Test generation on 10+ representative queries, check for:
+- [x] Test generation on 10+ representative queries, check for:
   - Hallucination (answer not grounded in context)
   - Missed context (answer ignores relevant retrieved doc)
-  - Citation accuracy
+  - Citation accuracy — **known gap:** `llama3.2:3b` does not reliably emit `(source: ...)`
+    tags even with explicit prompt instruction + few-shot example + `temperature=0`.
+    Grounding and refusal work correctly; inline citation does not at this model size.
+    `qwen2.5:7b` fallback not yet tried (requires pulling a new ~5GB image — deferred,
+    needs explicit go-ahead before pulling).
 
-**Done marker:** answers are grounded, cite sources, refuse gracefully when context insufficient.
+**Done marker:** answers are grounded, refuse gracefully when context insufficient. Citation
+is not reliable with the current model — treat as open item, not blocking MVP.
 
 ---
 

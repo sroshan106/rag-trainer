@@ -1,9 +1,5 @@
 """Ingest data/documents.csv into the pgvector store. Run: python -m src.ingestion.pipeline"""
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
 from src.ingestion.loaders import load_documents
 from src.ingestion.splitter import split_documents
 from src.vectorstore.store import build_vectorstore

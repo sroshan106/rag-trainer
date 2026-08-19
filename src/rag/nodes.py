@@ -4,6 +4,7 @@ import os
 
 from langchain_ollama import ChatOllama
 
+from src.rag.citations import citations_enabled, collect_sources
 from src.rag.prompts import RAG_PROMPT, format_context
 from src.vectorstore.store import load_vectorstore
 
@@ -45,9 +46,13 @@ def grade_node(state: dict) -> dict:
 
 def generate_node(state: dict) -> dict:
     if not state["graded_docs"]:
-        return {"answer": "I don't have enough context to answer that question."}
+        return {
+            "answer": "I don't have enough context to answer that question.",
+            "sources": [],
+        }
 
     context = format_context(state["graded_docs"])
     prompt = RAG_PROMPT.format(context=context, question=state["query"])
     response = _get_llm().invoke(prompt)
-    return {"answer": response.content}
+    sources = collect_sources(state["graded_docs"]) if citations_enabled() else []
+    return {"answer": response.content, "sources": sources}

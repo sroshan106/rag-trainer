@@ -80,3 +80,34 @@ def test_generate_node_calls_llm_with_formatted_context(monkeypatch):
     assert result["answer"] == "the answer"
     assert "fact one" in fake_llm.last_prompt
     assert "what?" in fake_llm.last_prompt
+
+
+def test_generate_node_collects_sources(monkeypatch):
+    monkeypatch.delenv("RAG_CITATIONS", raising=False)
+    monkeypatch.setattr(nodes, "_get_llm", lambda: FakeLLM("the answer"))
+    docs = [
+        Document(page_content="fact one", metadata={"source": "a.txt"}),
+        Document(page_content="fact two", metadata={"source": "a.txt"}),
+        Document(page_content="fact three", metadata={"source": "b.txt"}),
+    ]
+
+    result = nodes.generate_node({"query": "what?", "graded_docs": docs})
+
+    assert result["sources"] == ["a.txt", "b.txt"]
+
+
+def test_generate_node_skips_sources_when_disabled(monkeypatch):
+    monkeypatch.setenv("RAG_CITATIONS", "false")
+    monkeypatch.setattr(nodes, "_get_llm", lambda: FakeLLM("the answer"))
+    docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
+
+    result = nodes.generate_node({"query": "what?", "graded_docs": docs})
+
+    assert result["answer"] == "the answer"
+    assert result["sources"] == []
+
+
+def test_generate_node_fallback_has_empty_sources():
+    result = nodes.generate_node({"query": "q", "graded_docs": []})
+
+    assert result["sources"] == []

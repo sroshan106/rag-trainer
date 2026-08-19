@@ -6,6 +6,7 @@ from langchain_core.documents import Document
 from langgraph.graph import END, StateGraph
 from typing_extensions import TypedDict
 
+from src.rag.citations import format_sources
 from src.rag.nodes import generate_node, grade_node, retrieve_node
 
 MAX_RETRIES = 2
@@ -16,6 +17,7 @@ class RAGState(TypedDict):
     retrieved_docs: list[Document]
     graded_docs: list[Document]
     answer: str
+    sources: list[str]
     retry_count: int
 
 
@@ -44,15 +46,23 @@ def build_graph():
 graph = build_graph()
 
 
-def ask(query: str) -> str:
+def ask(query: str) -> dict:
+    """Return the answer plus the sources it was grounded in.
+
+    ``sources`` is empty when the citations extension is disabled.
+    """
     result = graph.invoke({"query": query, "retry_count": 0})
-    return result["answer"]
+    return {"answer": result["answer"], "sources": result.get("sources", [])}
 
 
 def main() -> int:
     query = " ".join(sys.argv[1:]) or "What is this document collection about?"
     print(f"query: {query}")
-    print(f"answer: {ask(query)}")
+    result = ask(query)
+    print(f"answer: {result['answer']}")
+    sources = format_sources(result["sources"])
+    if sources:
+        print(sources)
     return 0
 
 

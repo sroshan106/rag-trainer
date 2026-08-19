@@ -116,6 +116,7 @@ src/vectorstore/store.py    embed chunks, read/write pgvector
 src/rag/nodes.py            retrieve / grade / generate node functions
 src/rag/prompts.py          prompt templates
 src/rag/graph.py            state schema, graph wiring, entrypoint
+src/rag/citations.py        optional deterministic source citations
 data/raw                    source documents
 data/processed               derived artifacts
 ```
@@ -124,4 +125,13 @@ Domains: `ingestion` (raw docs -> chunks -> vectorstore), `vectorstore` (embeddi
 access, shared by ingestion and rag), `rag` (the LangGraph retrieve/grade/generate workflow).
 
 `src/rag/graph.py` wires the retrieve → grade → generate LangGraph workflow and exposes
-`ask(query)`. Run via `docker compose run app python -m src.rag.graph "your question"`.
+`ask(query)`, which returns `{"answer": ..., "sources": [...]}`. Run via
+`docker compose run app python -m src.rag.graph "your question"`.
+
+### Citations
+
+The generation model does not reliably follow the inline-citation instruction in
+`RAG_PROMPT`, so `src/rag/citations.py` collects sources in code from the documents that
+actually reached the prompt, deduplicated in retrieval-rank order. This is document-level
+attribution, not sentence-level. Set `RAG_CITATIONS=false` to disable it; `ask()` then
+returns an empty `sources` list and the CLI prints the answer alone.
