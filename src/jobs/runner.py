@@ -106,6 +106,19 @@ class JobRunner:
         with self._lock:
             return self._jobs.get(job_id)
 
+    def active(self, kind: str) -> Job | None:
+        """The pending-or-running job of this kind, if one exists.
+
+        Lets a route refuse to start a second ingest. A disabled button cannot
+        carry that guarantee -- a second browser tab, or a reloaded page, has
+        no idea the first one is mid-run.
+        """
+        with self._lock:
+            for job in self._jobs.values():
+                if job.kind == kind and job.status in ("pending", "running"):
+                    return job
+        return None
+
     def list(self) -> list[Job]:
         with self._lock:
             return sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)

@@ -14,6 +14,15 @@ from src.vectorstore.store import load_vectorstore
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 MODEL = "llama3.2:3b"
+
+# Both served locally by the same Ollama instance -- picking a second model
+# means picking a second local weights file, not adding a cloud provider.
+# qwen3:4b (Q4, ~2.5GB) is the Tier A pick for this card: it leaves headroom
+# under the 3.0GB budget for a reranker to run alongside it, unlike
+# qwen2.5:7b's ~4.7GB. Keep this in sync with what's actually pulled
+# (`docker exec <ollama container> ollama list`).
+AVAILABLE_MODELS = (MODEL, "qwen3:4b")
+
 RETRIEVE_K = 5
 
 # Absolute floor: a chunk this dissimilar is noise no matter what else came
@@ -33,7 +42,9 @@ def hybrid_enabled() -> bool:
     return env_flag("RAG_HYBRID", default=True)
 
 _vectorstore = None
-_llm = None
+# Keyed by model name rather than a single instance, since a query can now
+# pick between AVAILABLE_MODELS -- each gets its own lazily-built client.
+_llms: dict[str, ChatOllama] = {}
 # The benchmark runner invokes the graph from a thread pool, so the lazy
 # singletons below need guarding -- an unlocked race would build a second
 # PGVector engine (and its connection pool) and leak it.
@@ -49,13 +60,15 @@ def _get_vectorstore():
     return _vectorstore
 
 
-def _get_llm():
-    global _llm
-    if _llm is None:
+def _get_llm(model: str = MODEL) -> ChatOllama:
+    llm = _llms.get(model)
+    if llm is None:
         with _init_lock:
-            if _llm is None:
-                _llm = ChatOllama(model=MODEL, base_url=OLLAMA_BASE_URL, temperature=0)
-    return _llm
+            llm = _llms.get(model)
+            if llm is None:
+                llm = ChatOllama(model=model, base_url=OLLAMA_BASE_URL, temperature=0)
+                _llms[model] = llm
+    return llm
 
 
 @tracing.traced("retrieve")
@@ -144,13 +157,14 @@ def generate_node(state: dict) -> dict:
             "sources": [],
         }
 
+    model = state.get("model") or MODEL
     context = format_context(state["graded_docs"])
     prompt = RAG_PROMPT.format(context=context, question=state["query"])
-    response = _get_llm().invoke(prompt)
+    response = _get_llm(model).invoke(prompt)
     sources = collect_sources(state["graded_docs"]) if citations_enabled() else []
     tracing.detail(
         refused=False,
-        model=MODEL,
+        model=model,
         prompt_chars=len(prompt),
         docs=len(state["graded_docs"]),
         **_token_usage(response),

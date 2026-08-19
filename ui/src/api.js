@@ -23,15 +23,50 @@ async function request(path, options) {
   return res.json();
 }
 
-export function runQuery(query) {
-  return request("/query", { method: "POST", body: JSON.stringify({ query }) });
+export function runQuery(query, model = null) {
+  return request("/query", { method: "POST", body: JSON.stringify({ query, model }) });
 }
 
-export function startIngest() {
-  return request("/ingest", { method: "POST" });
+export function queryModels() {
+  return request("/query/models");
 }
 
-export function startBenchmark({ workers = 8, sample = null, use_cache = true } = {}) {
+export function ingestSplitters() {
+  return request("/ingest/splitters");
+}
+
+// Multipart, so no Content-Type header -- the browser must set the boundary.
+export async function uploadAndIngest(file, splitter = null) {
+  const body = new FormData();
+  body.append("file", file);
+  if (splitter) body.append("splitter", splitter);
+  const res = await fetch(`${BASE}/ingest/upload`, { method: "POST", body });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const parsed = await res.json();
+      detail = parsed.detail ?? detail;
+    } catch {
+      // response wasn't JSON -- fall back to statusText
+    }
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  return res.json();
+}
+
+export function activeIngest() {
+  return request("/ingest/active");
+}
+
+export function ingestHistory() {
+  return request("/ingest/history");
+}
+
+export function deleteIngestedFile(id) {
+  return request(`/ingest/files/${id}`, { method: "DELETE" });
+}
+
+export function startBenchmark({ workers = 4, sample = null, use_cache = true } = {}) {
   return request("/benchmark", {
     method: "POST",
     body: JSON.stringify({ workers, sample, use_cache }),
@@ -40,6 +75,14 @@ export function startBenchmark({ workers = 8, sample = null, use_cache = true } 
 
 export function benchmarkHistory() {
   return request("/benchmark/history");
+}
+
+export function queryHistory(limit = 50) {
+  return request(`/history?limit=${limit}`);
+}
+
+export function clearHistory() {
+  return request("/history", { method: "DELETE" });
 }
 
 export function getJob(id) {

@@ -1,28 +1,79 @@
-"""Ingest data/documents.csv into the pgvector store. Run: python -m src.ingestion.pipeline"""
+"""Ingest a CSV into the pgvector store. Run: python -m src.ingestion.pipeline path"""
+
+import argparse
+import sys
+from pathlib import Path
+from typing import Callable
 
 from src.ingestion.loaders import load_documents
-from src.ingestion.splitter import split_documents
+from src.ingestion.splitter import SPLITTERS, DEFAULT_SPLITTER, split_documents
 from src.vectorstore.lexical import ensure_index
 from src.vectorstore.store import build_vectorstore
 
-DATA_PATH = "data/documents.csv"
+# Called with (fraction_complete, message). The API's job runner passes one in
+# so the Ingest view can show real stage progress; the CLI passes none.
+ProgressHook = Callable[[float, str], None]
 
 
-def main() -> None:
-    docs = load_documents(DATA_PATH)
-    print(f"loaded {len(docs)} documents")
+def ingest(
+    path: str | Path,
+    progress: ProgressHook | None = None,
+    splitter: str = DEFAULT_SPLITTER,
+) -> dict:
+    """Load, split, and embed ``path``, returning what was written.
 
-    chunks = split_documents(docs)
-    print(f"split into {len(chunks)} chunks")
+    Returns a plain dict rather than printing, so the API can report counts
+    without scraping stdout.
+    """
 
-    build_vectorstore(chunks)
+    def report(fraction: float, message: str) -> None:
+        if progress is not None:
+            progress(fraction, message)
+
+    report(0.05, f"loading {path}")
+    docs = load_documents(path)
+
+    report(0.2, f"splitting {len(docs)} documents ({splitter})")
+    chunks = split_documents(docs, splitter=splitter)
+
+    # Embedding dominates the runtime, so it holds most of the progress range.
+    report(0.3, f"embedding {len(chunks)} chunks")
+    chunk_ids = build_vectorstore(chunks)
 
     # Hybrid retrieval's full-text half reads the same rows, so the index is
     # built here rather than in a separate migration step.
-    if ensure_index():
+    report(0.95, "building full-text index")
+    index_built = ensure_index()
+
+    report(1.0, "ingest complete")
+    return {
+        "path": str(path),
+        "documents": len(docs),
+        "chunks": len(chunks),
+        "chunk_ids": chunk_ids,
+        "splitter": splitter,
+        "index_built": index_built,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("path")
+    parser.add_argument(
+        "--splitter",
+        choices=list(SPLITTERS),
+        default=DEFAULT_SPLITTER,
+        help="chunking algorithm to use",
+    )
+    args = parser.parse_args(argv)
+
+    result = ingest(args.path, progress=lambda _f, message: print(message), splitter=args.splitter)
+    print(f"loaded {result['documents']} documents")
+    print(f"split into {result['chunks']} chunks ({result['splitter']})")
+    if result["index_built"]:
         print("built full-text index")
-    print("ingest complete")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

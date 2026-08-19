@@ -133,7 +133,7 @@ def test_generate_node_returns_fallback_when_no_graded_docs():
 
 def test_generate_node_calls_llm_with_formatted_context(monkeypatch):
     fake_llm = FakeLLM("the answer")
-    monkeypatch.setattr(nodes, "_get_llm", lambda: fake_llm)
+    monkeypatch.setattr(nodes, "_get_llm", lambda model=None: fake_llm)
     docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
 
     result = nodes.generate_node({"query": "what?", "graded_docs": docs})
@@ -145,7 +145,7 @@ def test_generate_node_calls_llm_with_formatted_context(monkeypatch):
 
 def test_generate_node_collects_sources(monkeypatch):
     monkeypatch.delenv("RAG_CITATIONS", raising=False)
-    monkeypatch.setattr(nodes, "_get_llm", lambda: FakeLLM("the answer"))
+    monkeypatch.setattr(nodes, "_get_llm", lambda model=None: FakeLLM("the answer"))
     docs = [
         Document(page_content="fact one", metadata={"source": "a.txt"}),
         Document(page_content="fact two", metadata={"source": "a.txt"}),
@@ -159,13 +159,37 @@ def test_generate_node_collects_sources(monkeypatch):
 
 def test_generate_node_skips_sources_when_disabled(monkeypatch):
     monkeypatch.setenv("RAG_CITATIONS", "false")
-    monkeypatch.setattr(nodes, "_get_llm", lambda: FakeLLM("the answer"))
+    monkeypatch.setattr(nodes, "_get_llm", lambda model=None: FakeLLM("the answer"))
     docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
 
     result = nodes.generate_node({"query": "what?", "graded_docs": docs})
 
     assert result["answer"] == "the answer"
     assert result["sources"] == []
+
+
+def test_generate_node_uses_the_requested_model(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        nodes, "_get_llm", lambda model=None: seen.append(model) or FakeLLM("ok")
+    )
+    docs = [Document(page_content="fact", metadata={"source": "a.txt"})]
+
+    nodes.generate_node({"query": "q", "model": "qwen3:4b", "graded_docs": docs})
+
+    assert seen == ["qwen3:4b"]
+
+
+def test_generate_node_defaults_model_when_absent(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        nodes, "_get_llm", lambda model=None: seen.append(model) or FakeLLM("ok")
+    )
+    docs = [Document(page_content="fact", metadata={"source": "a.txt"})]
+
+    nodes.generate_node({"query": "q", "graded_docs": docs})
+
+    assert seen == [nodes.MODEL]
 
 
 def test_generate_node_fallback_has_empty_sources():

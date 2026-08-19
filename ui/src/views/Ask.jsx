@@ -1,12 +1,46 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Card from "../components/Card.jsx";
-import { runQuery } from "../api.js";
+import SourceList from "../components/SourceList.jsx";
+import { runQuery, queryModels, queryHistory, clearHistory } from "../api.js";
+
+function formatWhen(iso) {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+}
 
 export default function Ask() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [historyError, setHistoryError] = useState(null);
+  const [models, setModels] = useState([]);
+  const [model, setModel] = useState("");
+
+  useEffect(() => {
+    queryModels()
+      .then(({ models: available, default: def }) => {
+        setModels(available);
+        setModel(def);
+      })
+      .catch(() => {
+        // No API yet -- the select just stays empty and the server picks its default.
+      });
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      setHistory(await queryHistory(25));
+      setHistoryError(null);
+    } catch (err) {
+      setHistoryError(err.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -15,12 +49,26 @@ export default function Ask() {
     setError(null);
     setResult(null);
     try {
-      const res = await runQuery(query.trim());
+      const res = await runQuery(query.trim(), model || null);
       setResult(res);
+      // Every answered query is recorded server-side, so the list is re-read
+      // rather than optimistically appended -- it stays correct even when the
+      // question came from the CLI or another tab.
+      refresh();
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function onClear() {
+    if (!window.confirm("Delete every saved question and answer?")) return;
+    try {
+      await clearHistory();
+      refresh();
+    } catch (err) {
+      setHistoryError(err.message);
     }
   }
 
@@ -37,6 +85,20 @@ export default function Ask() {
             onChange={(e) => setQuery(e.target.value)}
             disabled={loading}
           />
+          {models.length > 0 && (
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              disabled={loading}
+              className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-2 text-sm disabled:opacity-50 dark:[color-scheme:dark]"
+            >
+              {models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             type="submit"
             disabled={loading || !query.trim()}
@@ -54,32 +116,80 @@ export default function Ask() {
       )}
 
       {result && (
-        <Card title="Answer" subtitle={refused ? "No sources were cited -- likely a refusal." : undefined}>
+        <Card
+          title="Answer"
+          subtitle={refused ? "No sources were cited -- likely a refusal." : undefined}
+        >
           <p className="text-sm whitespace-pre-wrap leading-relaxed">{result.answer}</p>
-
-          {result.sources.length > 0 && (
-            <div className="mt-4 pt-3 border-t border-neutral-200 dark:border-neutral-800">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
-                Sources
-              </h3>
-              <ul className="text-xs space-y-1">
-                {result.sources.map((src, i) => (
-                  <li key={i}>
-                    <a
-                      href={src}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-blue-600 dark:text-blue-400 hover:underline break-all"
-                    >
-                      {src}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <SourceList sources={result.sources} />
         </Card>
       )}
+
+      <Card
+        title="Saved questions"
+        subtitle="Every answered query is stored in Postgres with its citations."
+      >
+        {historyError && (
+          <p className="text-sm text-red-600 dark:text-red-400">{historyError}</p>
+        )}
+
+        {!historyError && history.length === 0 && (
+          <p className="text-sm text-neutral-500">Nothing asked yet.</p>
+        )}
+
+        {history.length > 0 && (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-neutral-500">
+                    <th className="pb-2 pr-4">Question</th>
+                    <th className="pb-2 pr-4">Answer</th>
+                    <th className="pb-2 pr-4">Citations</th>
+                    <th className="pb-2 pr-4">Latency</th>
+                    <th className="pb-2 pr-4">Model</th>
+                    <th className="pb-2 pr-4">Asked</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((entry) => (
+                    <tr
+                      key={entry.id}
+                      className="border-t border-neutral-200 dark:border-neutral-800 align-top"
+                    >
+                      <td className="py-2 pr-4 font-medium max-w-xs">{entry.query}</td>
+                      <td className="py-2 pr-4 text-neutral-600 dark:text-neutral-300 whitespace-pre-wrap max-w-md">
+                        {entry.answer}
+                        {entry.refused && (
+                          <span className="ml-2 text-[11px] text-neutral-500">(refused)</span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-4 min-w-[16rem]">
+                        <SourceList sources={entry.sources} compact />
+                      </td>
+                      <td className="py-2 pr-4 text-xs text-neutral-500 whitespace-nowrap">
+                        {entry.latency_ms != null ? `${Math.round(entry.latency_ms)} ms` : "—"}
+                      </td>
+                      <td className="py-2 pr-4 text-xs text-neutral-500 whitespace-nowrap">
+                        {entry.model ?? "—"}
+                      </td>
+                      <td className="py-2 pr-4 text-xs text-neutral-500 whitespace-nowrap">
+                        {formatWhen(entry.created_at)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <button
+              onClick={onClear}
+              className="mt-4 rounded-md border border-neutral-300 dark:border-neutral-700 px-3 py-1.5 text-xs"
+            >
+              Clear history
+            </button>
+          </>
+        )}
+      </Card>
     </div>
   );
 }

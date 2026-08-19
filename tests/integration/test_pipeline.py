@@ -19,7 +19,7 @@ from src.observability import tracing  # noqa: E402
 from src.rag.graph import ask, graph  # noqa: E402
 from src.rag.nodes import RELEVANCE_FLOOR, SCORE_KEY  # noqa: E402
 
-# A fact that is unambiguously in data/documents.csv. If the corpus changes,
+# A fact that is unambiguously in tests/benchmark/data/documents.csv. If the corpus changes,
 # this is the assertion that needs updating.
 KNOWN_QUERY = "What are Bullet Kin?"
 KNOWN_FACT = "enem"  # "enemy"/"enemies" — matches without pinning exact phrasing

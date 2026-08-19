@@ -4,7 +4,7 @@ import StatusBadge from "../components/StatusBadge.jsx";
 import { startBenchmark, benchmarkHistory, pollJob } from "../api.js";
 
 export default function Benchmark() {
-  const [workers, setWorkers] = useState(8);
+  const [workers, setWorkers] = useState(4);
   const [sample, setSample] = useState("");
   const [useCache, setUseCache] = useState(true);
   const [job, setJob] = useState(null);
@@ -31,7 +31,7 @@ export default function Benchmark() {
     cancelledRef.current = false;
     try {
       const started = await startBenchmark({
-        workers: Number(workers) || 8,
+        workers: Number(workers) || 4,
         sample: sample ? Number(sample) : null,
         use_cache: useCache,
       });
