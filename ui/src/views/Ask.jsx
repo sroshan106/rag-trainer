@@ -8,6 +8,9 @@ function formatWhen(iso) {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
 }
 
+const MODEL_STORAGE_KEY = "rag:ask:model";
+const PENDING_POLL_MS = 2000;
+
 export default function Ask() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -22,7 +25,8 @@ export default function Ask() {
     queryModels()
       .then(({ models: available, default: def }) => {
         setModels(available);
-        setModel(def);
+        const saved = localStorage.getItem(MODEL_STORAGE_KEY);
+        setModel(saved && available.includes(saved) ? saved : def);
       })
       .catch(() => {
         // No API yet -- the select just stays empty and the server picks its default.
@@ -31,16 +35,31 @@ export default function Ask() {
 
   const refresh = useCallback(async () => {
     try {
-      setHistory(await queryHistory(25));
+      const rows = await queryHistory(25);
+      setHistory(rows);
       setHistoryError(null);
+      return rows;
     } catch (err) {
       setHistoryError(err.message);
+      return null;
     }
   }, []);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // The pending row is written to Postgres by the server the moment a query
+  // starts (before the graph runs), so it shows up here for every tab/client
+  // that reads history -- surviving a reload since it isn't client state at
+  // all. Poll while anything is still pending so it flips to done/error
+  // without the user having to act.
+  const hasPending = history.some((entry) => entry.status === "pending");
+  useEffect(() => {
+    if (!hasPending) return undefined;
+    const interval = setInterval(refresh, PENDING_POLL_MS);
+    return () => clearInterval(interval);
+  }, [hasPending, refresh]);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -49,16 +68,18 @@ export default function Ask() {
     setError(null);
     setResult(null);
     try {
-      const res = await runQuery(query.trim(), model || null);
+      const submitted = runQuery(query.trim(), model || null);
+      // The server inserts the pending row as its first step, before the
+      // graph runs -- refresh shortly after firing so it shows up promptly
+      // instead of waiting for the whole request to resolve.
+      setTimeout(refresh, 200);
+      const res = await submitted;
       setResult(res);
-      // Every answered query is recorded server-side, so the list is re-read
-      // rather than optimistically appended -- it stays correct even when the
-      // question came from the CLI or another tab.
-      refresh();
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+      await refresh();
     }
   }
 
@@ -88,7 +109,10 @@ export default function Ask() {
           {models.length > 0 && (
             <select
               value={model}
-              onChange={(e) => setModel(e.target.value)}
+              onChange={(e) => {
+                setModel(e.target.value);
+                localStorage.setItem(MODEL_STORAGE_KEY, e.target.value);
+              }}
               disabled={loading}
               className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-2 text-sm disabled:opacity-50 dark:[color-scheme:dark]"
             >
@@ -155,24 +179,38 @@ export default function Ask() {
                   {history.map((entry) => (
                     <tr
                       key={entry.id}
-                      className="border-t border-neutral-200 dark:border-neutral-800 align-top"
+                      className={`border-t border-neutral-200 dark:border-neutral-800 align-top ${
+                        entry.status === "pending" ? "animate-pulse" : ""
+                      }`}
                     >
                       <td className="py-2 pr-4 font-medium max-w-xs">{entry.query}</td>
-                      <td className="py-2 pr-4 text-neutral-600 dark:text-neutral-300 whitespace-pre-wrap max-w-md">
-                        {entry.answer}
-                        {entry.refused && (
-                          <span className="ml-2 text-[11px] text-neutral-500">(refused)</span>
-                        )}
-                      </td>
-                      <td className="py-2 pr-4 min-w-[16rem]">
-                        <SourceList sources={entry.sources} compact />
-                      </td>
-                      <td className="py-2 pr-4 text-xs text-neutral-500 whitespace-nowrap">
-                        {entry.latency_ms != null ? `${Math.round(entry.latency_ms)} ms` : "—"}
-                      </td>
-                      <td className="py-2 pr-4 text-xs text-neutral-500 whitespace-nowrap">
-                        {entry.model ?? "—"}
-                      </td>
+                      {entry.status === "pending" ? (
+                        <td className="py-2 pr-4 text-neutral-500 whitespace-nowrap" colSpan={4}>
+                          Asking...
+                        </td>
+                      ) : entry.status === "error" ? (
+                        <td className="py-2 pr-4 text-red-600 dark:text-red-400 whitespace-nowrap" colSpan={4}>
+                          Failed
+                        </td>
+                      ) : (
+                        <>
+                          <td className="py-2 pr-4 text-neutral-600 dark:text-neutral-300 whitespace-pre-wrap max-w-md">
+                            {entry.answer}
+                            {entry.refused && (
+                              <span className="ml-2 text-[11px] text-neutral-500">(refused)</span>
+                            )}
+                          </td>
+                          <td className="py-2 pr-4 min-w-[16rem]">
+                            <SourceList sources={entry.sources} compact />
+                          </td>
+                          <td className="py-2 pr-4 text-xs text-neutral-500 whitespace-nowrap">
+                            {entry.latency_ms != null ? `${Math.round(entry.latency_ms)} ms` : "—"}
+                          </td>
+                          <td className="py-2 pr-4 text-xs text-neutral-500 whitespace-nowrap">
+                            {entry.model ?? "—"}
+                          </td>
+                        </>
+                      )}
                       <td className="py-2 pr-4 text-xs text-neutral-500 whitespace-nowrap">
                         {formatWhen(entry.created_at)}
                       </td>

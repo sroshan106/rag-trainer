@@ -4,8 +4,8 @@ from src.rag.citations import UNKNOWN_SOURCE
 
 RAG_PROMPT = """Answer the question using ONLY the context below.
 If the context doesn't contain the answer, say so — don't guess.
-After every sentence that uses a fact from the context, add its source tag in \
-parentheses, e.g. "Paris is the capital of France (source: geo.txt)."
+Answer in plain prose -- don't cite or name sources inline, citations are \
+shown separately.
 
 Context:
 {context}

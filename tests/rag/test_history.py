@@ -11,6 +11,13 @@ import sqlalchemy as sa
 from src.rag import history
 
 
+def record(query, answer, sources, latency_ms=None, model=None):
+    """Test helper: start + complete in one call, mirroring the old one-shot record()."""
+    entry_id = history.start(query, model=model)
+    history.complete(entry_id, answer, sources, latency_ms=latency_ms)
+    return entry_id
+
+
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     """A throwaway database, with the module's engine cache cleared around it."""
@@ -25,7 +32,7 @@ def db(tmp_path, monkeypatch):
 
 
 def test_record_then_read_back(db):
-    entry_id = history.record(
+    entry_id = record(
         "who said it?", "Ruby did.", ["http://example.com/a"], latency_ms=12.5, model="m"
     )
 
@@ -39,14 +46,14 @@ def test_record_then_read_back(db):
 
 
 def test_an_answer_without_sources_is_marked_refused(db):
-    entry_id = history.record("off topic?", "I don't have enough context.", [])
+    entry_id = record("off topic?", "I don't have enough context.", [])
 
     assert history.get(entry_id)["refused"] is True
 
 
 def test_recent_returns_newest_first_and_respects_limit(db):
     for i in range(4):
-        history.record(f"q{i}", "a", [])
+        record(f"q{i}", "a", [])
 
     recent = history.recent(limit=2)
 
@@ -57,7 +64,7 @@ def test_recent_returns_newest_first_and_respects_limit(db):
 def test_disabled_history_records_nothing(db, monkeypatch):
     monkeypatch.setenv("RAG_HISTORY", "false")
 
-    assert history.record("q", "a", []) is None
+    assert record("q", "a", []) is None
     assert history.recent() == []
 
 
@@ -67,12 +74,12 @@ def test_a_write_failure_does_not_raise(db, monkeypatch, caplog):
         history, "_engine", lambda connection=None: (_ for _ in ()).throw(OSError("down"))
     )
 
-    assert history.record("q", "a", []) is None
+    assert record("q", "a", []) is None
 
 
 def test_delete_all_clears_the_table(db):
-    history.record("q1", "a", [])
-    history.record("q2", "a", [])
+    record("q1", "a", [])
+    record("q2", "a", [])
 
     assert history.delete_all() == 2
     assert history.recent() == []

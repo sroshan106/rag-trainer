@@ -55,17 +55,21 @@ def ask(query: str, model: str | None = None) -> dict:
     """
     resolved_model = model if model in AVAILABLE_MODELS else MODEL
     started = time.perf_counter()
-    with tracing.span("ask"):
-        result = graph.invoke({"query": query, "model": resolved_model})
+    entry_id = history.start(query=query, model=resolved_model)
+    try:
+        with tracing.span("ask"):
+            result = graph.invoke({"query": query, "model": resolved_model})
+    except Exception:
+        history.fail(entry_id)
+        raise
 
     answer = result["answer"]
     sources = result.get("sources", [])
-    entry_id = history.record(
-        query=query,
+    history.complete(
+        entry_id,
         answer=answer,
         sources=sources,
         latency_ms=round((time.perf_counter() - started) * 1000, 1),
-        model=resolved_model,
     )
     return {"answer": answer, "sources": sources, "id": entry_id}
 

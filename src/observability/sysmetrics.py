@@ -15,6 +15,7 @@ whole collector failing.
 """
 
 import shutil
+import time
 
 import psutil
 
@@ -26,23 +27,35 @@ except Exception as exc:  # pragma: no cover - exercised only without pynvml ins
     pynvml = None
     _NVML_IMPORT_ERROR = exc
 
+_NVML_RETRY_COOLDOWN_SECONDS = 30.0
+
 _nvml_ready = False
-_nvml_failed = False
+_nvml_last_fail_time: float | None = None
 
 
 def _ensure_nvml() -> bool:
-    """Initialize NVML once. Returns False permanently if it can't be used here."""
-    global _nvml_ready, _nvml_failed
+    """Initialize NVML, retrying after a cooldown if a prior attempt failed.
+
+    A failed nvmlInit() at process startup (driver not yet loaded, GPU
+    momentarily busy, container device not mounted yet, ...) is often
+    transient -- latching it permanently would show "no GPU detected" for
+    the rest of the process lifetime even once the GPU becomes reachable.
+    """
+    global _nvml_ready, _nvml_last_fail_time
     if _nvml_ready:
         return True
-    if _nvml_failed or pynvml is None:
+    if pynvml is None:
         return False
+    if _nvml_last_fail_time is not None:
+        if time.monotonic() - _nvml_last_fail_time < _NVML_RETRY_COOLDOWN_SECONDS:
+            return False
     try:
         pynvml.nvmlInit()
         _nvml_ready = True
+        _nvml_last_fail_time = None
         return True
     except Exception:
-        _nvml_failed = True
+        _nvml_last_fail_time = time.monotonic()
         return False
 
 

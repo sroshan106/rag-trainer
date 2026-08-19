@@ -30,7 +30,7 @@ def build_vectorstore(
     ids = ids or [str(uuid.uuid4()) for _ in chunks]
     PGVector.from_documents(
         documents=chunks,
-        embedding=_embeddings(),
+        embedding=_embeddings(num_gpu=999),
         collection_name=COLLECTION_NAME,
         connection=connection,
         ids=ids,
