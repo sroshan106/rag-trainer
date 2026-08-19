@@ -6,6 +6,7 @@ from langchain_core.documents import Document
 from langgraph.graph import END, StateGraph
 from typing_extensions import TypedDict
 
+from src.observability import tracing
 from src.rag.citations import format_sources
 from src.rag.nodes import generate_node, grade_node, retrieve_node
 
@@ -45,11 +46,14 @@ def ask(query: str) -> dict:
 
     ``sources`` is empty when the citations extension is disabled.
     """
-    result = graph.invoke({"query": query})
+    with tracing.span("ask"):
+        result = graph.invoke({"query": query})
     return {"answer": result["answer"], "sources": result.get("sources", [])}
 
 
 def main() -> int:
+    if tracing.tracing_enabled():
+        tracing.configure_logging()
     query = " ".join(sys.argv[1:]) or "What is this document collection about?"
     print(f"query: {query}")
     result = ask(query)

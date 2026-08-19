@@ -8,18 +8,14 @@ attribution, not sentence-level.
 Disable with RAG_CITATIONS=false to fall back to answer-only output.
 """
 
-import os
+from src.config import env_flag
 
 DEFAULT_ENABLED = True
-_FALSY = {"0", "false", "no", "off"}
 UNKNOWN_SOURCE = "unknown"
 
 
 def citations_enabled() -> bool:
-    raw = os.environ.get("RAG_CITATIONS")
-    if raw is None:
-        return DEFAULT_ENABLED
-    return raw.strip().lower() not in _FALSY
+    return env_flag("RAG_CITATIONS", default=DEFAULT_ENABLED)
 
 
 def collect_sources(docs: list) -> list[str]:
