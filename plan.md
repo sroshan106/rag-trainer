@@ -254,7 +254,7 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
 
 ## Phase 8: Testing & Evaluation
 
-- [ ] Unit tests: loader, splitter, retriever (mock vector store)
+- [x] Unit tests: loader, splitter, retriever (mock vector store)
 - [ ] Integration test: full graph invoke on known query → assert answer contains expected fact
 - [ ] Retrieval eval: build small labeled set (query → expected doc IDs), measure recall@k
 - [ ] Answer quality eval: manual review or LLM-as-judge scoring on relevance/faithfulness

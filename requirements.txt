@@ -9,3 +9,4 @@ tiktoken
 python-dotenv
 pypdf
 requests
+pytest
