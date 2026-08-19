@@ -226,8 +226,8 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
 
   Answer:"""
   ```
-- [ ] Format retrieved docs into context string, include source metadata for citation
-- [ ] LLM: **`llama3.2:3b` via Ollama** (fits fully in 4GB VRAM, fast GPU inference on GTX 1050). `qwen2.5:7b` as fallback if quality insufficient — tight on 4GB, may partial CPU-offload
+- [x] Format retrieved docs into context string, include source metadata for citation
+- [x] LLM: **`llama3.2:3b` via Ollama** (fits fully in 4GB VRAM, fast GPU inference on GTX 1050). `qwen2.5:7b` as fallback if quality insufficient — tight on 4GB, may partial CPU-offload
   ```python
   from langchain_ollama import ChatOllama
   llm = ChatOllama(model="llama3.2:3b", base_url=OLLAMA_BASE_URL)

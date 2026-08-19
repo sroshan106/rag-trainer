@@ -24,7 +24,7 @@ def _get_vectorstore():
 def _get_llm():
     global _llm
     if _llm is None:
-        _llm = ChatOllama(model="llama3.2:3b", base_url=OLLAMA_BASE_URL)
+        _llm = ChatOllama(model="llama3.2:3b", base_url=OLLAMA_BASE_URL, temperature=0)
     return _llm
 
 
