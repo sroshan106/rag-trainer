@@ -7,8 +7,9 @@ separate timing path.
 Run: python -m tests.benchmark.run_latency [repeats]
 
 Needs db + ollama up and an ingested vectorstore. Single-threaded on purpose:
-Ollama serialises generation on one GPU, so concurrent clients would measure
-queueing rather than the pipeline.
+Ollama does serve concurrent requests (run_benchmark.py exploits that), but
+under load the per-request numbers measure contention for parallel slots
+rather than the pipeline's own cost, which is what this script reports.
 """
 
 import statistics

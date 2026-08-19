@@ -7,11 +7,12 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_postgres import PGVector
 
 COLLECTION_NAME = "rag_chunks"
+EMBED_MODEL = "nomic-embed-text"
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 
 def _embeddings() -> OllamaEmbeddings:
-    return OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_BASE_URL)
+    return OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)
 
 
 def build_vectorstore(chunks: list[Document], connection: str | None = None) -> PGVector:

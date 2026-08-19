@@ -1,6 +1,7 @@
 """Phase 5: LangGraph nodes — retrieve, grade, generate."""
 
 import os
+import threading
 
 from langchain_ollama import ChatOllama
 
@@ -25,19 +26,27 @@ SCORE_KEY = "relevance_score"
 
 _vectorstore = None
 _llm = None
+# The benchmark runner invokes the graph from a thread pool, so the lazy
+# singletons below need guarding -- an unlocked race would build a second
+# PGVector engine (and its connection pool) and leak it.
+_init_lock = threading.Lock()
 
 
 def _get_vectorstore():
     global _vectorstore
     if _vectorstore is None:
-        _vectorstore = load_vectorstore()
+        with _init_lock:
+            if _vectorstore is None:
+                _vectorstore = load_vectorstore()
     return _vectorstore
 
 
 def _get_llm():
     global _llm
     if _llm is None:
-        _llm = ChatOllama(model=MODEL, base_url=OLLAMA_BASE_URL, temperature=0)
+        with _init_lock:
+            if _llm is None:
+                _llm = ChatOllama(model=MODEL, base_url=OLLAMA_BASE_URL, temperature=0)
     return _llm
 
 

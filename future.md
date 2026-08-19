@@ -65,6 +65,37 @@ This sits between "single local desktop app" and "public multi-tenant SaaS":
 
 This is arguably the deployment shape most consistent with the project's current "local-only, privacy-first" architecture decision (see `rag_architecture_decisions` memory) — it keeps that property while still adding multi-user support, which idea 4 (public SaaS) trades away.
 
+## 6. Hybrid retrieval: BM25 + dense with Reciprocal Rank Fusion
+
+Dense retrieval alone is weak on literal-phrase lookups, and the grading thresholds that compensate for it are fragile. Measured on the current 223-chunk corpus with `nomic-embed-text`:
+
+| Query | Top-5 relevance scores |
+| --- | --- |
+| who said I love you and ran off | 0.5685 … 0.5218 |
+| Ruby phoned Carla and said I love you | 0.6691 … 0.5455 |
+| who is the Doctor | 0.6126 … 0.5963 |
+| capital of Mongolia (off-topic) | 0.4454 … 0.4215 |
+| quantum chromodynamics (off-topic) | 0.4531 … 0.4432 |
+
+On-topic and off-topic scores are separated by roughly 0.07, and for the "I love you / ran off" query the correct chunk beats the best irrelevant chunk by only **+0.0156** cosine. `RELEVANCE_FLOOR` currently sits at 0.48 — about 0.027 above the observed noise ceiling. That works for this corpus, but any new document set shifts the distribution and the floor has to be re-tuned by hand.
+
+BM25 over the same chunks, same query, ranks the correct chunk first with a wide margin (16.86 vs 13.01 for the runner-up) — precisely because the query is a literal-phrase lookup (`"I love you"`, `"ran off"`), which is dense retrieval's weak spot and lexical search's strength.
+
+### Proposed shape
+
+Postgres already hosts the vectors via `PGVector`, so the lexical half needs no new infrastructure:
+
+1. Add a `tsvector` column over chunk text plus a GIN index on the existing collection table.
+2. Run `ts_rank_cd` full-text search alongside the vector search, retrieving top-k from each independently.
+3. Fuse the two ranked lists with Reciprocal Rank Fusion (`score = Σ 1/(60 + rank)`), rather than trying to normalize a cosine score against a BM25 score — the scales aren't comparable, ranks are.
+
+The payoff is that `grade_node` stops depending on absolute cosine thresholds. Grading becomes rank-based (keep the top-n fused results, refuse when neither retriever produced a confident hit), which removes the per-corpus threshold tuning that `RELEVANCE_FLOOR`/`RELEVANCE_RATIO` currently require.
+
+### Tested and rejected
+
+- **nomic task prefixes** (`search_query:` / `search_document:`). Measured on this corpus, the gold-vs-best-noise gap *shrank* from 0.0156 to 0.0013. Not worth a re-ingest here, despite being the documented usage for the model.
+- **Retrieval retry loop.** The comment in `src/rag/graph.py` is correct: re-running a deterministic, similarity-sorted retrieval can't surface a chunk the first pass missed. Only worth revisiting alongside query rewriting.
+
 ## Open questions to resolve before committing to any of the above
 
 - Is the product positioned as self-hosted (privacy-first, current direction per architecture decisions) or hosted SaaS (idea 4)? These pull in different directions — worth an explicit decision before idea 4 gets built, since it changes the hardware-detection story (idea 1) fundamentally.
