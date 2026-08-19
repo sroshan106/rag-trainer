@@ -53,11 +53,14 @@ def _load_csv(name: str) -> list[dict]:
 
 
 def _run(query: str) -> dict:
-    return graph.invoke({"query": query, "retry_count": 0})
+    return graph.invoke({"query": query})
 
 
 def eval_answerable(name: str, overlap_threshold: float = 0.3) -> dict:
     rows = _load_csv(name)
+    if not rows:
+        return {"name": name, "n": 0}
+
     overlaps = []
     recalls = []
     for row in rows:
@@ -83,6 +86,9 @@ def eval_answerable(name: str, overlap_threshold: float = 0.3) -> dict:
 
 def eval_no_answer(name: str) -> dict:
     rows = _load_csv(name)
+    if not rows:
+        return {"name": name, "n": 0}
+
     refused = 0
     for row in rows:
         result = _run(row["question"])

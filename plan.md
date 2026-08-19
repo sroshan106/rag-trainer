@@ -174,11 +174,11 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
       retrieved_docs: list[Document]
       graded_docs: list[Document]
       answer: str
-      retry_count: int
+      sources: list[str]
   ```
 - [x] Implement nodes (`src/nodes.py`):
   - `retrieve_node(state)` — calls retriever, populates `retrieved_docs`
-  - `grade_node(state)` — (optional) LLM or heuristic filters irrelevant docs
+  - `grade_node(state)` — drops blank chunks and anything under the relevance cutoffs
   - `generate_node(state)` — builds prompt from graded docs, calls LLM, returns `answer`
 - [x] Wire graph:
   ```python
@@ -191,24 +191,30 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
 
   workflow.set_entry_point("retrieve")
   workflow.add_edge("retrieve", "grade")
-
-  def should_retry(state):
-      if not state["graded_docs"] and state["retry_count"] < 2:
-          return "retrieve"
-      return "generate"
-
-  workflow.add_conditional_edges("grade", should_retry, {
-      "retrieve": "retrieve",
-      "generate": "generate",
-  })
+  workflow.add_edge("grade", "generate")
   workflow.add_edge("generate", END)
 
   graph = workflow.compile()
   ```
-- [ ] Test invocation: `graph.invoke({"query": "...", "retry_count": 0})`
+- [x] Test invocation: `graph.invoke({"query": "..."})`
 - [ ] Add tracing/logging (LangSmith optional, or manual print at each node)
 
-**Design note:** conditional retry loop is optional complexity — skip if simple retrieve→generate suffices. Add only if grading reveals frequent empty/weak retrievals.
+**Design note:** the conditional retry loop was implemented, then removed. Retrieval is
+deterministic and pgvector returns hits sorted by descending similarity, so re-running the
+same query — at any `k` — can never surface a chunk that clears the grader's cutoff when the
+top results did not. The loop was unreachable-in-effect code. Reinstate it only alongside
+query rewriting (Phase 7), which changes the query and therefore the result set.
+
+**Grading:** `grade_node` filters on relevance score, not just blank chunks. Two cutoffs,
+both env-tunable:
+- `RAG_RELEVANCE_FLOOR` (default `0.6`) — absolute floor, lets an off-topic query refuse
+  instead of citing the five least-bad chunks in the collection.
+- `RAG_RELEVANCE_RATIO` (default `0.8`) — relative to the best hit, drops filler that clears
+  the floor but is weak next to the top result.
+
+Measured on the current collection: on-topic hits score 0.67–0.80, off-topic noise 0.44–0.48,
+and a pure-gibberish query tops out at 0.56. Re-tune both if the corpus or embedding model
+changes.
 
 ---
 

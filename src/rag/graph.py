@@ -9,8 +9,6 @@ from typing_extensions import TypedDict
 from src.rag.citations import format_sources
 from src.rag.nodes import generate_node, grade_node, retrieve_node
 
-MAX_RETRIES = 2
-
 
 class RAGState(TypedDict):
     query: str
@@ -18,16 +16,14 @@ class RAGState(TypedDict):
     graded_docs: list[Document]
     answer: str
     sources: list[str]
-    retry_count: int
-
-
-def should_retry(state: RAGState) -> str:
-    if not state["graded_docs"] and state["retry_count"] < MAX_RETRIES:
-        return "retrieve"
-    return "generate"
 
 
 def build_graph():
+    # Linear retrieve -> grade -> generate. There is deliberately no retry
+    # edge: retrieval is deterministic and results come back sorted by
+    # descending similarity, so re-running the same query — at any k — can
+    # never surface a chunk that clears the grader's cutoff when the top
+    # results did not. Reinstate a loop only alongside query rewriting.
     workflow = StateGraph(RAGState)
     workflow.add_node("retrieve", retrieve_node)
     workflow.add_node("grade", grade_node)
@@ -35,9 +31,7 @@ def build_graph():
 
     workflow.set_entry_point("retrieve")
     workflow.add_edge("retrieve", "grade")
-    workflow.add_conditional_edges(
-        "grade", should_retry, {"retrieve": "retrieve", "generate": "generate"}
-    )
+    workflow.add_edge("grade", "generate")
     workflow.add_edge("generate", END)
 
     return workflow.compile()
@@ -51,7 +45,7 @@ def ask(query: str) -> dict:
 
     ``sources`` is empty when the citations extension is disabled.
     """
-    result = graph.invoke({"query": query, "retry_count": 0})
+    result = graph.invoke({"query": query})
     return {"answer": result["answer"], "sources": result.get("sources", [])}
 
 

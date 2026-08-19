@@ -23,6 +23,14 @@ def test_format_context_defaults_to_unknown_source():
     assert "[source: unknown]\nfact" in result
 
 
+def test_format_context_defaults_null_source_to_unknown():
+    docs = [Document(page_content="fact", metadata={"source": None})]
+
+    result = format_context(docs)
+
+    assert "[source: unknown]\nfact" in result
+
+
 def test_rag_prompt_grounds_and_allows_refusal():
     filled = RAG_PROMPT.format(context="ctx", question="q?")
 

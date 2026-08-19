@@ -13,7 +13,7 @@ def load_documents(path: str | Path) -> list[Document]:
     skipped = 0
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        for row_num, row in enumerate(reader, start=2):
+        for row in reader:
             index = row.get("index")
             source_url = row.get("source_url")
             text = row.get("text")

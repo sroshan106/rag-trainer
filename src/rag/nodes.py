@@ -11,6 +11,16 @@ from src.vectorstore.store import load_vectorstore
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 RETRIEVE_K = 5
 
+# Absolute floor: a chunk this dissimilar is noise no matter what else came
+# back — this is what lets an off-topic query refuse instead of citing the
+# five least-bad chunks in the collection.
+RELEVANCE_FLOOR = float(os.environ.get("RAG_RELEVANCE_FLOOR", "0.6"))
+# Relative cutoff: drop chunks far weaker than the best hit, so a query with
+# one strong match doesn't drag along filler that happens to clear the floor.
+RELEVANCE_RATIO = float(os.environ.get("RAG_RELEVANCE_RATIO", "0.8"))
+
+SCORE_KEY = "relevance_score"
+
 _vectorstore = None
 _llm = None
 
@@ -30,17 +40,24 @@ def _get_llm():
 
 
 def retrieve_node(state: dict) -> dict:
-    docs = _get_vectorstore().similarity_search(state["query"], k=RETRIEVE_K)
-    return {
-        "retrieved_docs": docs,
-        "retry_count": state.get("retry_count", 0) + 1,
-    }
+    scored = _get_vectorstore().similarity_search_with_relevance_scores(
+        state["query"], k=RETRIEVE_K
+    )
+    docs = []
+    for doc, score in scored:
+        doc.metadata[SCORE_KEY] = score
+        docs.append(doc)
+    return {"retrieved_docs": docs}
 
 
 def grade_node(state: dict) -> dict:
-    # Heuristic filter: drop empty/whitespace-only chunks. Swap for an
-    # LLM relevance grader if empty/weak retrievals show up in practice.
-    graded = [d for d in state["retrieved_docs"] if d.page_content.strip()]
+    docs = [d for d in state["retrieved_docs"] if d.page_content.strip()]
+    scores = [d.metadata.get(SCORE_KEY, 0.0) for d in docs]
+    if not scores:
+        return {"graded_docs": []}
+
+    cutoff = max(RELEVANCE_FLOOR, max(scores) * RELEVANCE_RATIO)
+    graded = [d for d in docs if d.metadata.get(SCORE_KEY, 0.0) >= cutoff]
     return {"graded_docs": graded}
 
 
