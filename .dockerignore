@@ -5,3 +5,4 @@ __pycache__
 *.pyc
 data/processed
 tests/__pycache__
+data/raw

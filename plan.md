@@ -4,6 +4,8 @@
 
 Build retrieval-augmented generation pipeline. User query retrieves relevant document chunks from vector store, chunks + query feed LLM, LLM generates grounded answer. LangGraph orchestrates control flow (retrieve → grade → generate → maybe retry), LangChain handles loaders/splitters/embeddings/vector store integrations.
 
+**Runs fully local, fully containerized — no external LLM API, no host-installed dependencies beyond Docker + NVIDIA driver.** LLM + embeddings served by Ollama, running as a Docker service with GPU passthrough (confirmed: NVIDIA GTX 1050, 4GB VRAM, driver 580.173.02, CUDA 13.0). `docker compose up` brings up Postgres+pgvector, Ollama (GPU), model pull, and app — one command, portable across any machine with Docker + nvidia-container-toolkit.
+
 **Target architecture:**
 
 ```
@@ -22,7 +24,7 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
   langchain
   langgraph
   langchain-community
-  langchain-openai       # or langchain-anthropic
+  langchain-ollama        # local LLM + embeddings
   langchain-postgres      # pgvector integration
   psycopg[binary]
   pgvector
@@ -30,7 +32,18 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
   python-dotenv
   pypdf
   ```
-- [ ] Set env vars in `.env`: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DATABASE_URL` (Postgres connection string)
+- [ ] Set env vars in `.env`: `DATABASE_URL` (Postgres connection string), `OLLAMA_BASE_URL` (default `http://localhost:11434` for bare venv use; `http://ollama:11434` when run via Docker)
+- [ ] Install `nvidia-container-toolkit` on host (one-time, enables GPU passthrough into Docker containers):
+  ```bash
+  curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+  curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  sudo apt-get update
+  sudo apt-get install -y nvidia-container-toolkit
+  sudo nvidia-ctk runtime configure --runtime=docker
+  sudo systemctl restart docker
+  ```
+- [ ] Verify GPU detected on host: `nvidia-smi` shows driver + GPU (confirmed working — GTX 1050, 4GB, CUDA 13.0)
+- [ ] Verify GPU passthrough into container: `docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi` shows GPU inside container
 - [ ] Project structure:
   ```
   rag/
@@ -56,20 +69,25 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
   ```
 - [ ] Verify installs: `python -c "import langgraph, langchain; print('ok')"`
 
-**Done marker:** environment activates, imports succeed, API key loads from `.env`.
+**Done marker:** environment activates, imports succeed, `.env` loads (only used for bare-venv/non-Docker runs).
 
-### Docker (local run)
+### Docker (fully containerized — primary run path)
 
 - [ ] `Dockerfile` — Python 3.11-slim app image, installs `requirements.txt`, runs `src/graph.py`
-- [ ] `docker-compose.yml` — two services:
+- [ ] `docker-compose.yml` — services:
+  - `ollama` — `ollama/ollama:latest` image, GPU reservation (`driver: nvidia, capabilities: [gpu]`), persists models via named volume, healthcheck via `ollama list`
+  - `ollama-pull` — one-shot init container, runs after `ollama` healthy, pulls `llama3.2:3b` + `nomic-embed-text` into the shared volume, exits
   - `db` — `pgvector/pgvector:pg16` image, exposes 5432, persists via named volume, healthcheck via `pg_isready`
-  - `app` — builds from `Dockerfile`, waits on `db` healthy, reads `.env`, `DATABASE_URL` points at `db` service (not localhost)
+  - `app` — builds from `Dockerfile`, waits on `db` healthy + `ollama` healthy + `ollama-pull` completed, `DATABASE_URL` points at `db` service, `OLLAMA_BASE_URL` points at `ollama` service (`http://ollama:11434`) — all container-network hostnames, zero host dependency beyond Docker + GPU driver
+- [ ] Requires `nvidia-container-toolkit` on host (one-time setup, see above) for the `ollama` service to see the GPU
 - [ ] `.dockerignore` — excludes `.venv`, `.git`, `.env`, `__pycache__`
-- [ ] Run: `docker compose up --build`
+- [ ] Run: `docker compose up --build` — single command, no host Ollama install, no host Postgres install
+- [ ] First run: `ollama-pull` downloads ~2-4GB of model weights into the `ollama_data` volume (one-time; cached on subsequent runs)
 - [ ] Verify: `docker compose exec db psql -U rag -d rag_db -c "CREATE EXTENSION IF NOT EXISTS vector;"` (image ships extension, just needs enabling per DB)
-- [ ] Confirm app container connects to db container and ingest/query works end-to-end
+- [ ] Verify GPU used inside `ollama` container: `docker compose exec ollama nvidia-smi`
+- [ ] Confirm app container connects to db + ollama services, ingest/query works end-to-end
 
-**Done marker:** `docker compose up` brings up Postgres+pgvector and app with zero manual local Postgres install.
+**Done marker:** `docker compose up` on a fresh machine (Docker + NVIDIA driver + nvidia-container-toolkit installed) brings up Postgres+pgvector, Ollama with GPU, models pulled, and app — zero manual installs beyond those three prerequisites, zero external API calls. This is the portability target.
 
 ---
 
@@ -104,23 +122,21 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
 
 ## Phase 4: Embeddings & Vector Store
 
-- [ ] Choose embedding model:
-  - `text-embedding-3-small` (OpenAI, cheap, 1536 dim) — default
-  - `text-embedding-3-large` — higher quality, costlier
-  - HuggingFace local model — no API cost, needs GPU/CPU tradeoff
+- [ ] Embedding model: **`nomic-embed-text` via Ollama** (local, no API cost, 768 dim)
 - [ ] Vector store: **PostgreSQL + pgvector** (self-hosted or managed e.g. Supabase/RDS)
 - [ ] Ensure Postgres has `pgvector` extension available (`CREATE EXTENSION IF NOT EXISTS vector;`)
 - [ ] Implement `src/vectorstore.py`:
   ```python
   import os
-  from langchain_openai import OpenAIEmbeddings
+  from langchain_ollama import OllamaEmbeddings
   from langchain_postgres import PGVector
 
   COLLECTION_NAME = "rag_chunks"
+  OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
   def build_vectorstore(chunks, connection=None):
       connection = connection or os.environ["DATABASE_URL"]
-      embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+      embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_BASE_URL)
       return PGVector.from_documents(
           documents=chunks,
           embedding=embeddings,
@@ -130,7 +146,7 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
 
   def load_vectorstore(connection=None):
       connection = connection or os.environ["DATABASE_URL"]
-      embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+      embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_BASE_URL)
       return PGVector(
           embeddings=embeddings,
           collection_name=COLLECTION_NAME,
@@ -211,7 +227,11 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
   Answer:"""
   ```
 - [ ] Format retrieved docs into context string, include source metadata for citation
-- [ ] Choose LLM: `gpt-4o` (quality) vs `gpt-4o-mini` (cost) vs Claude equivalent
+- [ ] LLM: **`llama3.2:3b` via Ollama** (fits fully in 4GB VRAM, fast GPU inference on GTX 1050). `qwen2.5:7b` as fallback if quality insufficient — tight on 4GB, may partial CPU-offload
+  ```python
+  from langchain_ollama import ChatOllama
+  llm = ChatOllama(model="llama3.2:3b", base_url=OLLAMA_BASE_URL)
+  ```
 - [ ] Test generation on 10+ representative queries, check for:
   - Hallucination (answer not grounded in context)
   - Missed context (answer ignores relevant retrieved doc)
@@ -248,9 +268,9 @@ Query → [Retrieve Node] → [Grade/Filter Node] → [Generate Node] → Answer
 |---|---|---|
 | Vector store | PostgreSQL + pgvector | need managed/serverless scale → Pinecone |
 | Chunk size | 1000 tokens, 100 overlap | retrieval missing context → increase; noisy results → decrease |
-| Embedding model | text-embedding-3-small | quality insufficient → text-embedding-3-large |
-| LLM | gpt-4o-mini | quality insufficient → gpt-4o |
-| Reranking | off | top-k results noisy/irrelevant → add Cohere rerank |
+| Embedding model | nomic-embed-text (Ollama, local) | quality insufficient → larger local model or hosted API |
+| LLM | llama3.2:3b (Ollama, local GPU) | quality insufficient → qwen2.5:7b, or hosted API if local ceiling hit |
+| Reranking | off | top-k results noisy/irrelevant → add local cross-encoder rerank |
 
 ## Overall Done Markers
 

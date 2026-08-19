@@ -1,10 +1,11 @@
 langchain
 langgraph
 langchain-community
-langchain-openai
+langchain-ollama
 langchain-postgres
 psycopg[binary]
 pgvector
 tiktoken
 python-dotenv
 pypdf
+requests
