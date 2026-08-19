@@ -5,6 +5,7 @@ langchain-ollama
 langchain-postgres
 psycopg[binary]
 pgvector
+sentence-transformers
 tiktoken
 python-dotenv
 pypdf

@@ -9,7 +9,7 @@ from src.config import env_flag
 from src.observability import tracing
 from src.rag.citations import citations_enabled, collect_sources
 from src.rag.prompts import RAG_PROMPT, format_context
-from src.vectorstore import hybrid
+from src.vectorstore import hybrid, rerank
 from src.vectorstore.store import load_vectorstore
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -24,6 +24,35 @@ MODEL = "llama3.2:3b"
 AVAILABLE_MODELS = (MODEL, "qwen3:4b")
 
 RETRIEVE_K = 5
+
+# How many candidates retrieval hands the reranker. The cross-encoder can only
+# reorder what it is given, so the top-k the grader sees is capped by what came
+# back here -- a chunk that lands at rank 7 in the fused list is unrecoverable
+# at RETRIEVE_K=5 no matter how well it would have scored. Widening the fetch
+# is what makes reranking able to pay for itself; it costs one larger SQL
+# result and 20 cross-encoder pairs, not 20 LLM calls.
+FETCH_K = int(os.environ.get("RAG_FETCH_K", "20"))
+
+# Ollama defaults num_ctx to 4096. Benchmark prompts on this corpus measure
+# ~3.5k tokens, which leaves no margin -- and an overflow is silent, truncating
+# from the front of the prompt, which is exactly where the highest-ranked
+# context sits. Set explicitly so the failure would be visible instead.
+NUM_CTX = int(os.environ.get("RAG_NUM_CTX", "8192"))
+
+# qwen3:4b does not fit this 4GB card at NUM_CTX=8192 -- Ollama spills part of
+# it to CPU, and CPU prefill on a multi-thousand-token RAG prompt measured
+# 400s+ for a single query. Measured empirically (`ollama ps` CPU/GPU split
+# while stepping num_ctx down): 3072 is the largest context that still loads
+# 100% GPU (3.0GB) on this card; 4096 already spills 6% to CPU. This trades
+# away some of the truncation margin NUM_CTX was set to buy back -- a long
+# RAG prompt can still overflow 3072 and lose its earliest (highest-ranked)
+# context -- but a slow-and-correct prompt is moot if the query times out
+# first.
+QWEN3_NUM_CTX = int(os.environ.get("RAG_NUM_CTX_QWEN3", "3072"))
+
+
+def _num_ctx_for(model: str) -> int:
+    return QWEN3_NUM_CTX if model.startswith("qwen3") else NUM_CTX
 
 # Absolute floor: a chunk this dissimilar is noise no matter what else came
 # back — this is what lets an off-topic query refuse instead of citing the
@@ -66,7 +95,17 @@ def _get_llm(model: str = MODEL) -> ChatOllama:
         with _init_lock:
             llm = _llms.get(model)
             if llm is None:
-                llm = ChatOllama(model=model, base_url=OLLAMA_BASE_URL, temperature=0)
+                llm = ChatOllama(
+                    model=model,
+                    base_url=OLLAMA_BASE_URL,
+                    temperature=0,
+                    num_ctx=_num_ctx_for(model),
+                    # Qwen3 thinks by default; a <think> block in the answer
+                    # would leak straight into the UI and cost tokens/latency
+                    # for no benefit on a single-hop factual RAG answer.
+                    # Ignored by models (like llama3.2) that don't support it.
+                    reasoning=False,
+                )
                 _llms[model] = llm
     return llm
 
@@ -74,18 +113,39 @@ def _get_llm(model: str = MODEL) -> ChatOllama:
 @tracing.traced("retrieve")
 def retrieve_node(state: dict) -> dict:
     store = _get_vectorstore()
+    reranking = rerank.rerank_enabled()
+    # Fetch wide only when something downstream will narrow the list back down;
+    # without the reranker the extra candidates would go straight to the grader
+    # and dilute it.
+    fetch_k = FETCH_K if reranking else RETRIEVE_K
+
     if hybrid_enabled():
-        docs = hybrid.retrieve(store, state["query"], k=RETRIEVE_K)
+        docs = hybrid.retrieve(store, state["query"], k=fetch_k)
     else:
         docs = []
         for doc, score in store.similarity_search_with_relevance_scores(
-            state["query"], k=RETRIEVE_K
+            state["query"], k=fetch_k
         ):
             doc.metadata[SCORE_KEY] = score
             docs.append(doc)
 
+    if reranking:
+        fetched = len(docs)
+        with tracing.span("rerank"):
+            docs = rerank.rerank(state["query"], docs, k=RETRIEVE_K)
+            tracing.detail(
+                model=rerank.RERANK_MODEL,
+                fetched=fetched,
+                kept=len(docs),
+                scores=[
+                    round(d.metadata[rerank.RERANK_SCORE_KEY], 4) for d in docs
+                ],
+            )
+
     tracing.detail(
         k=RETRIEVE_K,
+        fetch_k=fetch_k,
+        reranked=reranking,
         hybrid=hybrid_enabled(),
         scores=[
             None if d.metadata.get(SCORE_KEY) is None else round(d.metadata[SCORE_KEY], 4)
@@ -148,6 +208,34 @@ def grade_node(state: dict) -> dict:
     return {"graded_docs": graded}
 
 
+# qwen3's Ollama template always primes the assistant turn with a literal
+# `<think>`, regardless of the `reasoning`/`think` request flag -- this
+# server's template has no branch that skips it (see docker-compose.yml's
+# ollama image pin). "/no_think" is Qwen3's own soft switch: appended to the
+# user turn, it makes the model close the thinking block immediately instead
+# of spending tokens on it -- a real latency win, not just a display fix.
+# Model-specific rather than a generic ChatOllama kwarg because it's a
+# convention this model family reads out of the prompt text itself.
+_NO_THINK_SUFFIX = " /no_think"
+_THINKING_MODEL_PREFIXES = ("qwen3",)
+
+
+def _wants_no_think(model: str) -> bool:
+    return model.startswith(_THINKING_MODEL_PREFIXES)
+
+
+# Belt-and-suspenders: /no_think usually means the response has no <think>
+# block at all, but stripping one if it's there keeps the answer clean even
+# if a future model ignores the suffix.
+_THINK_CLOSE = "</think>"
+
+
+def _strip_thinking(text: str) -> str:
+    if _THINK_CLOSE in text:
+        return text.split(_THINK_CLOSE, 1)[1].strip()
+    return text.strip()
+
+
 @tracing.traced("generate")
 def generate_node(state: dict) -> dict:
     if not state["graded_docs"]:
@@ -160,7 +248,10 @@ def generate_node(state: dict) -> dict:
     model = state.get("model") or MODEL
     context = format_context(state["graded_docs"])
     prompt = RAG_PROMPT.format(context=context, question=state["query"])
+    if _wants_no_think(model):
+        prompt += _NO_THINK_SUFFIX
     response = _get_llm(model).invoke(prompt)
+    answer = _strip_thinking(response.content)
     sources = collect_sources(state["graded_docs"]) if citations_enabled() else []
     tracing.detail(
         refused=False,
@@ -169,7 +260,7 @@ def generate_node(state: dict) -> dict:
         docs=len(state["graded_docs"]),
         **_token_usage(response),
     )
-    return {"answer": response.content, "sources": sources}
+    return {"answer": answer, "sources": sources}
 
 
 def _token_usage(response) -> dict:

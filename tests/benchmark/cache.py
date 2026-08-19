@@ -5,9 +5,11 @@ throws away every completed answer, so results are appended to a JSONL file as
 they finish and replayed on the next run.
 
 The cache is keyed by a fingerprint of the configuration that can change an
-answer -- model, embedding model, k, and the two grading thresholds. Changing
-any of them writes to a different file, so a run after a threshold change can
-never silently reuse answers produced under the old cutoff.
+answer -- model, embedding model, k, the reranker, and the two grading
+thresholds. Changing any of them writes to a different file, so a run after a
+threshold change can never silently reuse answers produced under the old
+cutoff, and a rerank-on/rerank-off comparison cannot answer itself from the
+other side's cache.
 """
 
 import hashlib
@@ -16,6 +18,7 @@ import threading
 from pathlib import Path
 
 from src.rag import nodes
+from src.vectorstore import rerank
 from src.vectorstore.store import EMBED_MODEL
 
 CACHE_DIR = Path(__file__).parent / ".cache"
@@ -33,6 +36,9 @@ def config_fingerprint() -> str:
             "model": nodes.MODEL,
             "embed_model": EMBED_MODEL,
             "k": nodes.RETRIEVE_K,
+            "fetch_k": nodes.FETCH_K,
+            "rerank": rerank.rerank_enabled(),
+            "rerank_model": rerank.RERANK_MODEL,
             "floor": nodes.RELEVANCE_FLOOR,
             "ratio": nodes.RELEVANCE_RATIO,
         },

@@ -9,6 +9,13 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    environment:
+      # This has to live on the server, not the app container -- the app
+      # never reads it, Ollama does. Keeping only one model resident forces
+      # a full GPU offload for whichever one is loaded (chat or embedder)
+      # instead of splitting the 4GB card between both and spilling the
+      # chat model's layers onto CPU.
+      OLLAMA_MAX_LOADED_MODELS: "1"
     volumes:
       - ollama_data:/root/.ollama
     ports:
@@ -27,7 +34,7 @@ services:
     entrypoint: /bin/sh
     command:
       - -c
-      - "OLLAMA_HOST=ollama:11434 ollama pull llama3.2:3b && OLLAMA_HOST=ollama:11434 ollama pull nomic-embed-text"
+      - "OLLAMA_HOST=ollama:11434 ollama pull llama3.2:3b && OLLAMA_HOST=ollama:11434 ollama pull qwen3:4b && OLLAMA_HOST=ollama:11434 ollama pull nomic-embed-text"
     restart: "no"
 
   db:
@@ -63,12 +70,30 @@ services:
       DATABASE_URL: postgresql+psycopg://rag:rag@db:5432/rag_db
       OLLAMA_BASE_URL: http://ollama:11434
       RAG_CITATIONS: "${RAG_CITATIONS:-true}"
+      RAG_RERANK: "${RAG_RERANK:-true}"
+      RAG_FETCH_K: "${RAG_FETCH_K:-20}"
+      RAG_NUM_CTX: "${RAG_NUM_CTX:-8192}"
+      RAG_NUM_CTX_QWEN3: "${RAG_NUM_CTX_QWEN3:-3072}"
     volumes:
       - ./data:/app/data
       - ./src:/app/src
     ports:
       - "8000:8000"
 
+  ui:
+    build: ./ui
+    restart: "no"
+    depends_on:
+      - app
+    environment:
+      VITE_API_PROXY_TARGET: http://app:8000
+    volumes:
+      - ./ui:/app
+      - ui_node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+
 volumes:
   pg_data:
   ollama_data:
+  ui_node_modules:

@@ -12,8 +12,9 @@ EMBED_MODEL = "nomic-embed-text"
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 
-def _embeddings() -> OllamaEmbeddings:
-    return OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL)
+def _embeddings(num_gpu: int | None = None) -> OllamaEmbeddings:
+    kwargs = {} if num_gpu is None else {"num_gpu": num_gpu}
+    return OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL, **kwargs)
 
 
 def build_vectorstore(
@@ -38,9 +39,13 @@ def build_vectorstore(
 
 
 def load_vectorstore(connection: str | None = None) -> PGVector:
+    """Query-path store. Embeds on CPU (num_gpu=0) -- generation already
+    fills the card's ~4GB, and a query embeds one short string, so CPU
+    keeps the model's VRAM free for the LLM at negligible latency cost.
+    """
     connection = connection or os.environ["DATABASE_URL"]
     return PGVector(
-        embeddings=_embeddings(),
+        embeddings=_embeddings(num_gpu=0),
         collection_name=COLLECTION_NAME,
         connection=connection,
     )
