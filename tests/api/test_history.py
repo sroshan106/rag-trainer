@@ -55,3 +55,33 @@ def test_delete_reports_how_many_rows_went(client, monkeypatch):
     monkeypatch.setattr(history_route.history, "delete_all", lambda: 3)
 
     assert client.delete("/api/history").json() == {"deleted": 3}
+
+
+def test_delete_one_entry_reports_the_row(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        history_route.history, "delete", lambda entry_id: seen.append(entry_id) or 1
+    )
+
+    resp = client.delete("/api/history/abc")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 1}
+    assert seen == ["abc"]
+
+
+def test_deleting_an_unknown_entry_is_a_404(client, monkeypatch):
+    monkeypatch.setattr(history_route.history, "delete", lambda entry_id: 0)
+
+    resp = client.delete("/api/history/nope")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "no such history entry"
+
+
+def test_status_is_part_of_the_response(client, monkeypatch):
+    monkeypatch.setattr(
+        history_route.history, "recent", lambda limit: [{**ENTRY, "status": "cancelled"}]
+    )
+
+    assert client.get("/api/history").json()[0]["status"] == "cancelled"

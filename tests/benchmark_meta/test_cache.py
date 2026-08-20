@@ -51,7 +51,7 @@ def test_truncated_final_line_is_skipped(tmp_path):
 def test_eval_uses_the_cache_it_is_given(tmp_path, monkeypatch):
     """The whole point of passing a cache in: answers must land in it."""
     monkeypatch.setattr(
-        run_benchmark, "_run", lambda q: {"answer": "x", "retrieved_indices": ["7"]}
+        run_benchmark, "_run", lambda q, model=None: {"answer": "x", "retrieved_indices": ["7"]}
     )
     with ResultCache(tmp_path / "c.jsonl") as cache:
         run_benchmark.eval_answerable(

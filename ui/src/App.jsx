@@ -3,12 +3,14 @@ import Ask from "./views/Ask.jsx";
 import Ingest from "./views/Ingest.jsx";
 import SystemView from "./views/System.jsx";
 import Benchmark from "./views/Benchmark.jsx";
+import Settings from "./views/Settings.jsx";
 
 const NAV = [
   { to: "/ask", label: "Ask" },
   { to: "/ingest", label: "Ingest" },
   { to: "/system", label: "System" },
   { to: "/benchmark", label: "Benchmark" },
+  { to: "/settings", label: "Settings" },
 ];
 
 function linkClass({ isActive }) {
@@ -42,6 +44,7 @@ export default function App() {
           <Route path="/ingest" element={<Ingest />} />
           <Route path="/system" element={<SystemView />} />
           <Route path="/benchmark" element={<Benchmark />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/ask" replace />} />
         </Routes>
       </main>

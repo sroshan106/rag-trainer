@@ -24,16 +24,21 @@ from src.vectorstore.store import EMBED_MODEL
 CACHE_DIR = Path(__file__).parent / ".cache"
 
 
-def config_fingerprint() -> str:
+def config_fingerprint(model: str | None = None) -> str:
     """Short hash of every setting that could change a cached answer.
 
     Read off the module rather than imported by name: the sweep rebinds the
     cutoffs between grid points, and imported copies would leave every point
     sharing one cache file.
+
+    ``model`` overrides the default for a run that was asked to benchmark a
+    specific one. It must be part of the key, not a detail beside it -- two
+    models answer the same question differently, and sharing a cache file
+    between them would serve llama's answers as qwen's.
     """
     payload = json.dumps(
         {
-            "model": nodes.MODEL,
+            "model": model or nodes.MODEL,
             "embed_model": EMBED_MODEL,
             "k": nodes.RETRIEVE_K,
             "fetch_k": nodes.FETCH_K,

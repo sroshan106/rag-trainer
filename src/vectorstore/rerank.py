@@ -105,6 +105,16 @@ def _get_model():
     return _model
 
 
+def ensure_loaded() -> None:
+    """Force the cross-encoder to load (and download from HF if missing) now.
+
+    Exists for the Settings view's download button -- calling this once from
+    a background job means the first real query never pays the download, and
+    the loaded singleton is what ``rerank`` then reuses.
+    """
+    _get_model()
+
+
 def _squash(logit: float) -> float:
     return 1.0 / (1.0 + math.exp(-logit))
 

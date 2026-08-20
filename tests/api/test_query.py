@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from src.api.app import app
@@ -65,3 +67,91 @@ def test_query_failure_surfaces_as_502(monkeypatch):
 
     assert resp.status_code == 502
     assert "ollama unreachable" in resp.json()["detail"]
+
+
+def _sse_events(text):
+    """Pull the JSON payloads out of an SSE body.
+
+    The whole body arrives at once here -- TestClient runs the endpoint to
+    completion -- so the events can be parsed after the fact rather than
+    incrementally.
+    """
+    return [
+        json.loads(line[len("data:"):].strip())
+        for line in text.splitlines()
+        if line.startswith("data:")
+    ]
+
+
+def test_stream_emits_the_events_ask_stream_produced(monkeypatch):
+    def fake_ask_stream(query, model=None):
+        yield {"type": "stage", "stage": "retrieve"}
+        yield {"type": "token", "text": f"answer to {query}"}
+        yield {"type": "done", "id": "e1", "answer": "done", "sources": ["a.txt"]}
+
+    monkeypatch.setattr("src.api.routes.query.ask_stream", fake_ask_stream)
+
+    resp = client.post("/api/query/stream", json={"query": "what is this?"})
+
+    assert resp.status_code == 200
+    events = _sse_events(resp.text)
+    assert [e["type"] for e in events] == ["stage", "token", "done"]
+    assert events[1]["text"] == "answer to what is this?"
+    assert events[2]["sources"] == ["a.txt"]
+
+
+def test_stream_names_each_sse_event_after_its_type(monkeypatch):
+    def fake_ask_stream(query, model=None):
+        yield {"type": "done", "answer": "a", "sources": []}
+
+    monkeypatch.setattr("src.api.routes.query.ask_stream", fake_ask_stream)
+
+    resp = client.post("/api/query/stream", json={"query": "q"})
+
+    assert "event: done" in resp.text
+
+
+def test_stream_passes_the_chosen_model_through(monkeypatch):
+    seen = {}
+
+    def fake_ask_stream(query, model=None):
+        seen["model"] = model
+        yield {"type": "done", "answer": "a", "sources": []}
+
+    monkeypatch.setattr("src.api.routes.query.ask_stream", fake_ask_stream)
+
+    client.post("/api/query/stream", json={"query": "q", "model": "qwen3:4b"})
+
+    assert seen["model"] == "qwen3:4b"
+
+
+def test_stream_rejects_an_unknown_model():
+    resp = client.post("/api/query/stream", json={"query": "q", "model": "gpt-4"})
+
+    assert resp.status_code == 422
+
+
+def test_stream_forwards_an_error_event(monkeypatch):
+    def fake_ask_stream(query, model=None):
+        yield {"type": "error", "detail": "ollama unreachable"}
+
+    monkeypatch.setattr("src.api.routes.query.ask_stream", fake_ask_stream)
+
+    events = _sse_events(client.post("/api/query/stream", json={"query": "q"}).text)
+
+    assert events == [{"type": "error", "detail": "ollama unreachable"}]
+
+
+def test_collection_reports_the_chunk_count(monkeypatch):
+    monkeypatch.setattr("src.api.routes.query.count_chunks", lambda: 42)
+
+    resp = client.get("/api/query/collection")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"chunks": 42, "empty": False}
+
+
+def test_collection_is_empty_when_nothing_is_ingested(monkeypatch):
+    monkeypatch.setattr("src.api.routes.query.count_chunks", lambda: 0)
+
+    assert client.get("/api/query/collection").json() == {"chunks": 0, "empty": True}

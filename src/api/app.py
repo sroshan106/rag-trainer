@@ -10,7 +10,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routes import benchmark, history, ingest, jobs, metrics, query
+from src.api.routes import benchmark, history, ingest, jobs, metrics, models, query
 from src.observability.logging import configure_logging
 
 HOST = os.environ.get("RAG_API_HOST", "127.0.0.1")
@@ -42,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(benchmark.router)
     app.include_router(metrics.router)
     app.include_router(jobs.router)
+    app.include_router(models.router)
 
     @app.get("/api/health")
     def health() -> dict:

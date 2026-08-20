@@ -3,6 +3,8 @@
 import os
 import uuid
 
+import sqlalchemy as sa
+
 from langchain_core.documents import Document
 from langchain_ollama import OllamaEmbeddings
 from langchain_postgres import PGVector
@@ -56,3 +58,34 @@ def delete_chunks(chunk_ids: list[str], connection: str | None = None) -> None:
     if not chunk_ids:
         return
     load_vectorstore(connection).delete(ids=chunk_ids)
+
+
+_COUNT_SQL = """
+SELECT count(*)
+FROM langchain_pg_embedding e
+JOIN langchain_pg_collection c ON c.uuid = e.collection_id
+WHERE c.name = :collection
+"""
+
+
+def count_chunks(connection: str | None = None) -> int:
+    """How many chunks are stored in the collection.
+
+    Queried directly rather than through PGVector: the UI asks this on every
+    page load only to tell "nothing ingested yet" apart from "asked something
+    the corpus doesn't cover", and building a store (and its embeddings client)
+    for a COUNT would be the expensive way to answer it. Returns 0 when the
+    collection -- or the whole schema -- doesn't exist yet.
+    """
+    connection = connection or os.environ["DATABASE_URL"]
+    engine = sa.create_engine(connection)
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.text(_COUNT_SQL), {"collection": COLLECTION_NAME}
+            ).first()
+        return int(row[0]) if row else 0
+    except sa.exc.SQLAlchemyError:
+        return 0
+    finally:
+        engine.dispose()

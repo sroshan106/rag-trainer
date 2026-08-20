@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import Card from "../components/Card.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
-import { startBenchmark, benchmarkHistory, pollJob } from "../api.js";
+import { startBenchmark, benchmarkHistory, benchmarkModels, cancelJob, pollJob } from "../api.js";
 
 export default function Benchmark() {
   const [workers, setWorkers] = useState(4);
   const [sample, setSample] = useState("");
+  const [chunkSize, setChunkSize] = useState(10);
   const [useCache, setUseCache] = useState(true);
+  const [models, setModels] = useState([]);
+  const [model, setModel] = useState("");
   const [job, setJob] = useState(null);
   const [history, setHistory] = useState([]);
   const [error, setError] = useState(null);
+  const [stopping, setStopping] = useState(false);
   const cancelledRef = useRef(false);
 
-  const running = job && job.status === "running";
+  const running = job && (job.status === "running" || job.status === "pending");
 
   async function loadHistory() {
     try {
@@ -24,16 +28,32 @@ export default function Benchmark() {
 
   useEffect(() => {
     loadHistory();
+    benchmarkModels()
+      .then(({ models: available, default: fallback }) => {
+        setModels(available);
+        setModel(fallback);
+      })
+      .catch(() => {
+        // an empty picker falls back to the server-side default model
+      });
+  }, []);
+
+  // Stop polling if the view unmounts -- the run itself keeps going server-side.
+  useEffect(() => () => {
+    cancelledRef.current = true;
   }, []);
 
   async function onStart() {
     setError(null);
+    setStopping(false);
     cancelledRef.current = false;
     try {
       const started = await startBenchmark({
         workers: Number(workers) || 4,
         sample: sample ? Number(sample) : null,
         use_cache: useCache,
+        chunk_size: Number(chunkSize) || 10,
+        model: model || null,
       });
       setJob(started);
       await pollJob(started.id, {
@@ -43,6 +63,21 @@ export default function Benchmark() {
       loadHistory();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setStopping(false);
+    }
+  }
+
+  async function onStop() {
+    if (!job) return;
+    setStopping(true);
+    try {
+      // Cancellation lands between chunks, so the job stays "running" for a
+      // few seconds after this returns -- polling continues either way.
+      await cancelJob(job.id);
+    } catch (err) {
+      setError(err.message);
+      setStopping(false);
     }
   }
 
@@ -50,9 +85,22 @@ export default function Benchmark() {
     <div className="flex flex-col gap-4">
       <Card
         title="Benchmark"
-        subtitle="Runs tests.benchmark.run_benchmark.run_all as a background job against the labeled question sets."
+        subtitle="Runs the labeled question sets in interleaved chunks, so every suite reports numbers while the run is still going."
       >
         <div className="flex flex-wrap items-end gap-4 mb-3">
+          <Field label="Model">
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1 text-sm"
+            >
+              {models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label="Workers">
             <input
               type="number"
@@ -73,6 +121,16 @@ export default function Benchmark() {
               className="w-24 rounded-md border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1 text-sm"
             />
           </Field>
+          <Field label="Chunk size">
+            <input
+              type="number"
+              min={1}
+              max={200}
+              value={chunkSize}
+              onChange={(e) => setChunkSize(e.target.value)}
+              className="w-20 rounded-md border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1 text-sm"
+            />
+          </Field>
           <label className="flex items-center gap-2 text-sm pb-1.5">
             <input
               type="checkbox"
@@ -82,13 +140,24 @@ export default function Benchmark() {
             Use cache
           </label>
         </div>
-        <button
-          onClick={onStart}
-          disabled={running}
-          className="rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 px-4 py-2 text-sm font-medium disabled:opacity-50"
-        >
-          {running ? "Running..." : "Run benchmark"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onStart}
+            disabled={running}
+            className="rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 px-4 py-2 text-sm font-medium disabled:opacity-50"
+          >
+            {running ? "Running..." : "Run benchmark"}
+          </button>
+          {running && (
+            <button
+              onClick={onStop}
+              disabled={stopping}
+              className="rounded-md border border-neutral-300 dark:border-neutral-700 px-4 py-2 text-sm font-medium disabled:opacity-50"
+            >
+              {stopping ? "Stopping..." : "Stop"}
+            </button>
+          )}
+        </div>
       </Card>
 
       {error && (
@@ -103,7 +172,10 @@ export default function Benchmark() {
             <StatusBadge status={job.status} />
             <span className="text-xs text-neutral-500">{job.message}</span>
           </div>
-          {job.status === "done" && job.result && <ResultsTable results={job.result} />}
+          {running && <ProgressBar value={job.progress} />}
+          {/* Rendered at every status, not just "done": the job publishes
+              running totals after each chunk, which is the whole point. */}
+          {job.result && <ResultsTable results={job.result} partial={job.status !== "done"} />}
           {job.status === "failed" && (
             <pre className="mt-3 text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap">
               {job.error}
@@ -125,7 +197,7 @@ export default function Benchmark() {
                     {new Date(h.created_at * 1000).toLocaleString()}
                   </span>
                 </div>
-                {h.status === "done" && h.result && <ResultsTable results={h.result} />}
+                {h.result && <ResultsTable results={h.result} partial={h.status !== "done"} />}
               </div>
             ))}
           </div>
@@ -144,9 +216,25 @@ function Field({ label, children }) {
   );
 }
 
-function ResultsTable({ results }) {
+function ProgressBar({ value }) {
+  return (
+    <div className="h-1.5 w-full rounded-full bg-neutral-200 dark:bg-neutral-800 mb-3">
+      <div
+        className="h-full rounded-full bg-blue-500 transition-[width] duration-500"
+        style={{ width: `${Math.round((value ?? 0) * 100)}%` }}
+      />
+    </div>
+  );
+}
+
+function ResultsTable({ results, partial = false }) {
   return (
     <div className="overflow-x-auto">
+      {partial && (
+        <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">
+          Partial — scored over the questions answered so far.
+        </p>
+      )}
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-neutral-500 border-b border-neutral-200 dark:border-neutral-800">

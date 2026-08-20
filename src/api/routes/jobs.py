@@ -27,3 +27,19 @@ def get_job(job_id: str) -> dict:
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return job.to_dict()
+
+
+@router.post("/{job_id}/cancel", response_model=JobResponse)
+def cancel_job(job_id: str) -> dict:
+    """Ask a running job to stop and keep whatever it has produced so far.
+
+    Lives here rather than under /api/benchmark so ingest gets it for free.
+    The returned job usually still reads "running" -- cancellation is
+    cooperative, and the status only flips once the body unwinds.
+    """
+    job = runner.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if not runner.cancel(job_id):
+        raise HTTPException(status_code=409, detail=f"job already {job.status}")
+    return job.to_dict()

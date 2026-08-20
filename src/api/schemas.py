@@ -21,15 +21,27 @@ class QueryResponse(BaseModel):
     id: str | None = None
 
 
+class CollectionStatus(BaseModel):
+    chunks: int
+    empty: bool
+
+
 class HistoryEntry(BaseModel):
     id: str
     created_at: str
     query: str
-    answer: str
+    answer: str | None
     sources: list[str]
-    refused: bool
+    refused: bool | None
     latency_ms: float | None = None
+    # Breakout of latency_ms spent reranking vs. waiting on the LLM. Null
+    # when that step didn't run (rerank disabled, or the refusal path).
+    rerank_ms: float | None = None
+    generate_ms: float | None = None
     model: str | None = None
+    # "done", "pending", "error", or "cancelled" -- the UI renders a row
+    # differently for each, so it is part of the contract, not an internal.
+    status: str | None = None
 
 
 class IngestFileEntry(BaseModel):
@@ -49,6 +61,16 @@ class BenchmarkRequest(BaseModel):
     workers: int = Field(default=4, ge=1, le=32)
     sample: int | None = Field(default=None, ge=1, le=1000)
     use_cache: bool = True
+    # Questions per suite per round. The suites are interleaved so partial
+    # metrics are comparable; see run_benchmark.CHUNK_SIZE.
+    chunk_size: int = Field(default=10, ge=1, le=200)
+    # Omitted means the pipeline default; the route validates it against
+    # AVAILABLE_MODELS rather than trusting whatever string arrives.
+    model: str | None = None
+
+
+class PullModelRequest(BaseModel):
+    model: str
 
 
 class JobResponse(BaseModel):

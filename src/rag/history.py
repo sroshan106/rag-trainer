@@ -30,6 +30,10 @@ _metadata = sa.MetaData()
 STATUS_PENDING = "pending"
 STATUS_DONE = "done"
 STATUS_ERROR = "error"
+# The client hung up (or hit Cancel) while the answer was still streaming.
+# Distinct from "error": nothing went wrong, the user just stopped caring,
+# and whatever tokens had already arrived are kept.
+STATUS_CANCELLED = "cancelled"
 
 query_history = sa.Table(
     TABLE_NAME,
@@ -44,6 +48,12 @@ query_history = sa.Table(
     sa.Column("sources", JSONB, nullable=True),
     sa.Column("refused", sa.Boolean, nullable=True),
     sa.Column("latency_ms", sa.Float, nullable=True),
+    # Breakout of latency_ms: how much of the total went to the cross-encoder
+    # vs. waiting on Ollama generation, so a slow query points at which knob
+    # to tune. Null when the respective step didn't run (rerank disabled,
+    # refusal path with no generation).
+    sa.Column("rerank_ms", sa.Float, nullable=True),
+    sa.Column("generate_ms", sa.Float, nullable=True),
     sa.Column("model", sa.String(128), nullable=True),
     sa.Column("status", sa.String(16), nullable=False, server_default=STATUS_DONE),
 )
@@ -70,6 +80,8 @@ def _migrate(engine: sa.Engine) -> None:
         "ALTER TABLE query_history ALTER COLUMN answer DROP NOT NULL",
         "ALTER TABLE query_history ALTER COLUMN sources DROP NOT NULL",
         "ALTER TABLE query_history ALTER COLUMN refused DROP NOT NULL",
+        "ALTER TABLE query_history ADD COLUMN IF NOT EXISTS rerank_ms DOUBLE PRECISION",
+        "ALTER TABLE query_history ADD COLUMN IF NOT EXISTS generate_ms DOUBLE PRECISION",
     ]
     with engine.begin() as conn:
         for statement in statements:
@@ -124,6 +136,8 @@ def complete(
     answer: str,
     sources: list[str],
     latency_ms: float | None = None,
+    rerank_ms: float | None = None,
+    generate_ms: float | None = None,
     connection: str | None = None,
 ) -> None:
     """Fill in a pending row's answer once the graph finishes."""
@@ -142,6 +156,8 @@ def complete(
                     # answer text later would mean re-parsing prose.
                     refused=not sources,
                     latency_ms=latency_ms,
+                    rerank_ms=rerank_ms,
+                    generate_ms=generate_ms,
                     status=STATUS_DONE,
                 )
             )
@@ -176,6 +192,8 @@ def _row_to_dict(row) -> dict:
         "sources": sources or [],
         "refused": row.refused,
         "latency_ms": row.latency_ms,
+        "rerank_ms": row.rerank_ms,
+        "generate_ms": row.generate_ms,
         "model": row.model,
         "status": row.status,
     }
@@ -203,3 +221,31 @@ def delete_all(connection: str | None = None) -> int:
     """Clear the history. Returns how many rows were removed."""
     with _engine(connection).begin() as conn:
         return conn.execute(query_history.delete()).rowcount
+
+
+def cancel(entry_id: str, partial_answer: str = "", connection: str | None = None) -> None:
+    """Mark a pending row as cancelled, keeping whatever text had streamed.
+
+    The partial answer is stored rather than discarded: a half-finished answer
+    is often enough to see whether the query was going anywhere, and throwing
+    it away would leave the row indistinguishable from a failure.
+    """
+    if entry_id is None:
+        return
+    try:
+        with _engine(connection).begin() as conn:
+            conn.execute(
+                query_history.update()
+                .where(query_history.c.id == entry_id)
+                .values(answer=partial_answer or None, status=STATUS_CANCELLED)
+            )
+    except Exception:  # noqa: BLE001 - history is auxiliary, never fatal
+        logger.warning("failed to mark query history as cancelled", exc_info=True)
+
+
+def delete(entry_id: str, connection: str | None = None) -> int:
+    """Remove one entry. Returns how many rows were removed (0 or 1)."""
+    with _engine(connection).begin() as conn:
+        return conn.execute(
+            query_history.delete().where(query_history.c.id == entry_id)
+        ).rowcount

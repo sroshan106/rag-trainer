@@ -348,3 +348,154 @@ def test_rerank_preserves_component_scores(monkeypatch):
 
     assert kept.metadata[nodes.SCORE_KEY] == 0.73
     assert 0.0 < kept.metadata[nodes.rerank.RERANK_SCORE_KEY] < 1.0
+
+
+class FakeStreamingLLM:
+    """A ChatOllama stand-in for the streaming path: chunks with ``.content``."""
+
+    def __init__(self, chunks):
+        self.chunks = chunks
+        self.last_prompt = None
+        self.closed = False
+
+    def stream(self, prompt):
+        self.last_prompt = prompt
+        try:
+            for chunk in self.chunks:
+                yield FakeResponse(chunk)
+        except GeneratorExit:
+            self.closed = True
+            raise
+
+
+def _drain(generator):
+    """Run a generator to exhaustion, returning ``(yielded, return_value)``."""
+    yielded = []
+    while True:
+        try:
+            yielded.append(next(generator))
+        except StopIteration as stop:
+            return yielded, stop.value
+
+
+def test_think_filter_passes_plain_text_straight_through():
+    think = nodes._ThinkFilter()
+
+    assert think.feed("Hello ") == "Hello "
+    assert think.feed("world") == "world"
+
+
+def test_think_filter_suppresses_a_think_block_across_chunk_boundaries():
+    think = nodes._ThinkFilter()
+
+    # The opening tag arrives split, so no single chunk ever looks like a tag.
+    assert think.feed("<thi") == ""
+    assert think.feed("nk>") == ""
+    assert think.feed("reasoning about it") == ""
+    assert think.feed("</think>the ") == "the "
+    # Everything after the close tag streams without further inspection.
+    assert think.feed("<think>") == "<think>"
+
+
+def test_think_filter_releases_text_that_only_looked_like_a_tag():
+    think = nodes._ThinkFilter()
+
+    assert think.feed("<") == ""
+    assert think.feed("p>hi") == "<p>hi"
+
+
+def test_generate_stream_yields_tokens_and_returns_the_assembled_answer(monkeypatch):
+    monkeypatch.delenv("RAG_CITATIONS", raising=False)
+    fake_llm = FakeStreamingLLM(["the ", "answer"])
+    monkeypatch.setattr(nodes, "_get_llm", lambda model=None: fake_llm)
+    docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
+
+    tokens, result = _drain(nodes.generate_stream({"query": "what?", "graded_docs": docs}))
+
+    assert tokens == ["the ", "answer"]
+    assert result == {"answer": "the answer", "sources": ["a.txt"]}
+    assert "fact one" in fake_llm.last_prompt
+    assert "what?" in fake_llm.last_prompt
+
+
+def test_generate_stream_strips_a_streamed_thinking_block(monkeypatch):
+    monkeypatch.setattr(
+        nodes,
+        "_get_llm",
+        lambda model=None: FakeStreamingLLM(["<think>", "hmm", "</think>", "the answer"]),
+    )
+    docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
+
+    tokens, result = _drain(nodes.generate_stream({"query": "what?", "graded_docs": docs}))
+
+    assert tokens == ["the answer"]
+    assert result["answer"] == "the answer"
+
+
+def test_generate_stream_refuses_without_graded_docs():
+    tokens, result = _drain(nodes.generate_stream({"query": "q", "graded_docs": []}))
+
+    assert tokens == [nodes.REFUSAL_ANSWER]
+    assert result == {"answer": nodes.REFUSAL_ANSWER, "sources": []}
+
+
+def test_generate_stream_uses_the_requested_model(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        nodes,
+        "_get_llm",
+        lambda model=None: seen.append(model) or FakeStreamingLLM(["ok"]),
+    )
+    docs = [Document(page_content="fact", metadata={"source": "a.txt"})]
+
+    _drain(nodes.generate_stream({"query": "q", "model": "qwen3:4b", "graded_docs": docs}))
+
+    assert seen == ["qwen3:4b"]
+
+
+def test_generate_stream_closing_early_stops_the_llm(monkeypatch):
+    """Cancellation has to reach Ollama, not just stop the caller reading."""
+    fake_llm = FakeStreamingLLM(["one ", "two ", "three"])
+    monkeypatch.setattr(nodes, "_get_llm", lambda model=None: fake_llm)
+    docs = [Document(page_content="fact", metadata={"source": "a.txt"})]
+
+    generation = nodes.generate_stream({"query": "q", "graded_docs": docs})
+    assert next(generation) == "one "
+    generation.close()
+
+    assert fake_llm.closed is True
+
+
+def test_generate_stream_skips_sources_when_citations_disabled(monkeypatch):
+    monkeypatch.setenv("RAG_CITATIONS", "false")
+    monkeypatch.setattr(nodes, "_get_llm", lambda model=None: FakeStreamingLLM(["a"]))
+    docs = [Document(page_content="fact", metadata={"source": "a.txt"})]
+
+    _, result = _drain(nodes.generate_stream({"query": "q", "graded_docs": docs}))
+
+    assert result["sources"] == []
+
+
+def test_prompt_for_defaults_the_model_and_builds_the_prompt():
+    docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
+
+    model, prompt = nodes._prompt_for({"query": "what?", "graded_docs": docs})
+
+    assert model == nodes.MODEL
+    assert "fact one" in prompt
+    assert "what?" in prompt
+
+
+def test_prompt_for_appends_no_think_for_a_thinking_model():
+    docs = [Document(page_content="fact", metadata={"source": "a.txt"})]
+
+    model, prompt = nodes._prompt_for(
+        {"query": "q", "model": "qwen3:4b", "graded_docs": docs}
+    )
+
+    assert model == "qwen3:4b"
+    assert prompt.endswith("/no_think")
+
+
+def test_refusal_is_the_shared_constant():
+    assert nodes._refusal() == {"answer": nodes.REFUSAL_ANSWER, "sources": []}

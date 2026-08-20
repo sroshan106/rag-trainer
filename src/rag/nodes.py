@@ -236,20 +236,61 @@ def _strip_thinking(text: str) -> str:
     return text.strip()
 
 
-@tracing.traced("generate")
-def generate_node(state: dict) -> dict:
-    if not state["graded_docs"]:
-        tracing.detail(refused=True)
-        return {
-            "answer": "I don't have enough context to answer that question.",
-            "sources": [],
-        }
+REFUSAL_ANSWER = "I don't have enough context to answer that question."
 
+
+class _ThinkFilter:
+    """Drop a leading ``<think>`` block from a stream, token by token.
+
+    ``_strip_thinking`` can only run on a finished answer. Streaming needs the
+    same rule applied incrementally: hold text back while it still might be the
+    opening of a think block, and release everything after the close tag. A
+    model that never opens one pays only the first token of delay.
+    """
+
+    _OPEN = "<think>"
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._passthrough = False
+
+    def feed(self, chunk: str) -> str:
+        """Return the part of ``chunk`` that is safe to show now."""
+        if self._passthrough:
+            return chunk
+        self._buffer += chunk
+        text = self._buffer.lstrip()
+        if _THINK_CLOSE in text:
+            self._passthrough = True
+            return text.split(_THINK_CLOSE, 1)[1].lstrip()
+        # Still ambiguous while the text so far is a prefix of "<think>".
+        if text.startswith(self._OPEN) or self._OPEN.startswith(text):
+            return ""
+        self._passthrough = True
+        return text
+
+
+def _refusal() -> dict:
+    tracing.detail(refused=True)
+    return {"answer": REFUSAL_ANSWER, "sources": []}
+
+
+def _prompt_for(state: dict) -> tuple[str, str]:
+    """Build the generation prompt. Returns ``(model, prompt)``."""
     model = state.get("model") or MODEL
     context = format_context(state["graded_docs"])
     prompt = RAG_PROMPT.format(context=context, question=state["query"])
     if _wants_no_think(model):
         prompt += _NO_THINK_SUFFIX
+    return model, prompt
+
+
+@tracing.traced("generate")
+def generate_node(state: dict) -> dict:
+    if not state["graded_docs"]:
+        return _refusal()
+
+    model, prompt = _prompt_for(state)
     response = _get_llm(model).invoke(prompt)
     answer = _strip_thinking(response.content)
     sources = collect_sources(state["graded_docs"]) if citations_enabled() else []
@@ -261,6 +302,55 @@ def generate_node(state: dict) -> dict:
         **_token_usage(response),
     )
     return {"answer": answer, "sources": sources}
+
+
+def generate_stream(state: dict):
+    """Yield answer text as it arrives; return generate_node's dict at the end.
+
+    Written alongside ``generate_node`` rather than wrapping it: only the
+    streaming path can surface a partial answer, and the CLI and benchmark
+    callers have no use for a token-by-token path they would only re-join.
+    Consume it with ``result = yield from generate_stream(state)``.
+
+    Closing the generator early (the client hung up, or hit Cancel) propagates
+    GeneratorExit into ``llm.stream``, which is what actually stops Ollama
+    generating instead of letting an abandoned query run to completion.
+    """
+    with tracing.span("generate"):
+        if not state["graded_docs"]:
+            refusal = _refusal()
+            yield refusal["answer"]
+            return refusal
+
+        model, prompt = _prompt_for(state)
+        think = _ThinkFilter()
+        parts = []
+        last = None
+        for chunk in _get_llm(model).stream(prompt):
+            last = chunk
+            visible = think.feed(chunk.content)
+            # Whatever follows a think block starts with the newlines that
+            # closed it; leading blank space in a streamed answer is visible
+            # in a way it never is in one returned whole.
+            if not parts:
+                visible = visible.lstrip()
+            if visible:
+                parts.append(visible)
+                yield visible
+
+        answer = "".join(parts).strip()
+        sources = collect_sources(state["graded_docs"]) if citations_enabled() else []
+        tracing.detail(
+            refused=False,
+            model=model,
+            prompt_chars=len(prompt),
+            docs=len(state["graded_docs"]),
+            streamed=True,
+            # Ollama reports its counts on the final chunk of a stream, so the
+            # usage fields come from there rather than from a whole response.
+            **_token_usage(last),
+        )
+        return {"answer": answer, "sources": sources}
 
 
 def _token_usage(response) -> dict:

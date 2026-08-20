@@ -6,11 +6,19 @@ compares actual retrieval/answers against the labeled question sets.
 Questions are dispatched concurrently -- Ollama serves parallel requests, and
 the pipeline is entirely I/O-bound from the client's side. Completed answers
 are cached to disk as they arrive, so an interrupted run resumes instead of
-replaying every LLM call. The cache key includes the grading thresholds, so
-re-running after a threshold change re-evaluates rather than reusing stale
-answers.
+replaying every LLM call. The cache key includes the grading thresholds and
+the model, so re-running after a threshold change re-evaluates rather than
+reusing stale answers.
 
-Run: python -m tests.benchmark.run_benchmark [--workers N] [--sample N] [--no-cache]
+The suites are interleaved in chunks rather than run one after another: a
+sequential pass leaves the last suite's metrics undefined until the whole run
+is nearly over, which makes a partial run useless for judging a config change.
+Round-robin chunks of CHUNK_SIZE keep every suite's numbers advancing together,
+so stopping early still leaves three comparable (if noisier) metrics.
+
+Run: python -m tests.benchmark.run_benchmark [--workers N] [--sample N]
+                                             [--chunk-size N] [--model NAME]
+                                             [--no-cache]
 """
 
 import argparse
@@ -21,12 +29,19 @@ import statistics
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Callable
 
 from src.rag.graph import graph
-from src.rag.nodes import RETRIEVE_K
+from src.rag.nodes import AVAILABLE_MODELS, MODEL, RETRIEVE_K
 from tests.benchmark.cache import CACHE_DIR, ResultCache, config_fingerprint
 
 DATA_DIR = Path(__file__).parent / "data"
+
+# Questions taken from each suite per round before moving to the next suite.
+# Small enough that all three suites report numbers within the first minute of
+# a run; large enough that the ThreadPoolExecutor is not rebuilt every couple
+# of questions.
+CHUNK_SIZE = 10
 
 # Measured on a 4GB card with llama3.2:3b, using real benchmark questions
 # (~3.5k-token prompts): 5.3s/question at 1 worker, 2.2s at 2, 2.3s at 4. Gains
@@ -81,9 +96,14 @@ def _load_csv(name: str, sample: int | None = None) -> list[dict]:
     return [rows[i] for i in picked]
 
 
-def _run(query: str) -> dict:
+def _run(query: str, model: str | None = None) -> dict:
     """Invoke the graph, reduced to the JSON-serialisable fields eval needs."""
-    result = graph.invoke({"query": query})
+    state = {"query": query}
+    # Left out entirely when unset rather than passed as None, so the graph
+    # falls back to its own default instead of having to defend against one.
+    if model:
+        state["model"] = model
+    result = graph.invoke(state)
     return {
         "answer": result["answer"],
         "retrieved_indices": [
@@ -92,7 +112,19 @@ def _run(query: str) -> dict:
     }
 
 
-def _run_suite(name: str, rows: list[dict], workers: int, cache: ResultCache) -> list[dict]:
+def _dummy_cache() -> ResultCache:
+    # ``is None``, not truthiness: an empty ResultCache has len() == 0 and is
+    # therefore falsy, which would silently swap a real cache for the dummy.
+    return ResultCache(CACHE_DIR / "unused.jsonl", enabled=False)
+
+
+def _run_suite(
+    name: str,
+    rows: list[dict],
+    workers: int,
+    cache: ResultCache,
+    model: str | None = None,
+) -> list[dict]:
     """Return one result dict per row, in row order, reusing cached answers."""
 
     def resolve(row: dict) -> dict:
@@ -100,7 +132,7 @@ def _run_suite(name: str, rows: list[dict], workers: int, cache: ResultCache) ->
         hit = cache.get(name, question)
         if hit is not None:
             return hit
-        result = _run(question)
+        result = _run(question, model)
         cache.put(name, question, result)
         return result
 
@@ -112,22 +144,16 @@ def _run_suite(name: str, rows: list[dict], workers: int, cache: ResultCache) ->
         return list(pool.map(resolve, rows))
 
 
-def eval_answerable(
-    name: str,
-    workers: int = DEFAULT_WORKERS,
-    cache: ResultCache | None = None,
-    sample: int | None = None,
-    overlap_threshold: float = 0.3,
+def score_answerable(
+    name: str, rows: list[dict], results: list[dict], overlap_threshold: float = 0.3
 ) -> dict:
-    rows = _load_csv(name, sample)
-    if not rows:
-        return {"name": name, "n": 0}
+    """Metrics for however many rows have been answered so far.
 
-    # ``is None``, not truthiness: an empty ResultCache has len() == 0 and is
-    # therefore falsy, which would silently swap a real cache for the dummy.
-    if cache is None:
-        cache = ResultCache(CACHE_DIR / "unused.jsonl", enabled=False)
-    results = _run_suite(name, rows, workers, cache)
+    Pure -- no LLM, no cache. Split out from ``eval_answerable`` so the chunked
+    scheduler can rescore after every chunk without re-running anything.
+    """
+    if not results:
+        return {"name": name, "n": 0}
 
     recalls = [
         1.0 if row["document_index"] in set(result["retrieved_indices"]) else 0.0
@@ -141,28 +167,17 @@ def eval_answerable(
     pass_rate = sum(1 for o in overlaps if o >= overlap_threshold) / len(overlaps)
     return {
         "name": name,
-        "n": len(rows),
+        "n": len(results),
         f"recall@{RETRIEVE_K}": statistics.mean(recalls),
         "mean_answer_overlap": statistics.mean(overlaps),
         f"pass_rate(overlap>={overlap_threshold})": pass_rate,
     }
 
 
-def eval_no_answer(
-    name: str,
-    workers: int = DEFAULT_WORKERS,
-    cache: ResultCache | None = None,
-    sample: int | None = None,
-) -> dict:
-    rows = _load_csv(name, sample)
-    if not rows:
+def score_no_answer(name: str, rows: list[dict], results: list[dict]) -> dict:
+    """Refusal rate over however many rows have been answered so far."""
+    if not results:
         return {"name": name, "n": 0}
-
-    # ``is None``, not truthiness: an empty ResultCache has len() == 0 and is
-    # therefore falsy, which would silently swap a real cache for the dummy.
-    if cache is None:
-        cache = ResultCache(CACHE_DIR / "unused.jsonl", enabled=False)
-    results = _run_suite(name, rows, workers, cache)
 
     refused = sum(
         1
@@ -171,28 +186,110 @@ def eval_no_answer(
     )
     return {
         "name": name,
-        "n": len(rows),
-        "correct_refusal_rate": refused / len(rows),
+        "n": len(results),
+        "correct_refusal_rate": refused / len(results),
     }
+
+
+def eval_answerable(
+    name: str,
+    workers: int = DEFAULT_WORKERS,
+    cache: ResultCache | None = None,
+    sample: int | None = None,
+    overlap_threshold: float = 0.3,
+    model: str | None = None,
+) -> dict:
+    rows = _load_csv(name, sample)
+    if not rows:
+        return {"name": name, "n": 0}
+    # ``is None``, not truthiness: an empty ResultCache has len() == 0 and is
+    # therefore falsy, which would silently swap a real cache for the dummy.
+    results = _run_suite(
+        name, rows, workers, _dummy_cache() if cache is None else cache, model
+    )
+    return score_answerable(name, rows, results, overlap_threshold)
+
+
+def eval_no_answer(
+    name: str,
+    workers: int = DEFAULT_WORKERS,
+    cache: ResultCache | None = None,
+    sample: int | None = None,
+    model: str | None = None,
+) -> dict:
+    rows = _load_csv(name, sample)
+    if not rows:
+        return {"name": name, "n": 0}
+    # ``is None``, not truthiness: an empty ResultCache has len() == 0 and is
+    # therefore falsy, which would silently swap a real cache for the dummy.
+    results = _run_suite(
+        name, rows, workers, _dummy_cache() if cache is None else cache, model
+    )
+    return score_no_answer(name, rows, results)
+
+
+class _Suite:
+    """One question set plus the answers collected for it so far."""
+
+    def __init__(self, csv_name: str, scorer: Callable[[str, list, list], dict], rows: list[dict]):
+        self.name = csv_name
+        self.scorer = scorer
+        self.rows = rows
+        self.results: list[dict] = []
+
+    @property
+    def remaining(self) -> list[dict]:
+        return self.rows[len(self.results):]
+
+    def score(self) -> dict:
+        return self.scorer(self.name, self.rows, self.results)
 
 
 def run_all(
     workers: int = DEFAULT_WORKERS,
     sample: int | None = None,
     use_cache: bool = True,
+    model: str | None = None,
+    chunk_size: int = CHUNK_SIZE,
+    on_progress: Callable[[list[dict], int, int], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> list[dict]:
-    """Run all three suites and return their metric dicts.
+    """Run all three suites interleaved in chunks and return their metric dicts.
 
     The programmatic entry point -- ``main`` is a thin CLI wrapper over this so
     the API can run a benchmark without going through argv or stdout.
+
+    ``on_progress(metrics, done, total)`` fires after every chunk with metrics
+    for *all* suites scored over what has been answered so far, which is what
+    lets a caller display live numbers. ``should_stop()`` is polled at the same
+    points; returning True ends the run and returns the partial metrics rather
+    than raising, so a stopped run is still a readable result.
     """
-    cache_path = CACHE_DIR / f"{config_fingerprint()}.jsonl"
+    if model and model not in AVAILABLE_MODELS:
+        raise ValueError(f"unknown model {model!r} -- choose from {list(AVAILABLE_MODELS)}")
+
+    suites = [
+        _Suite("single_passage_answer_questions.csv", score_answerable, _load_csv("single_passage_answer_questions.csv", sample)),
+        _Suite("multi_passage_answer_questions.csv", score_answerable, _load_csv("multi_passage_answer_questions.csv", sample)),
+        _Suite("no_answer_questions.csv", score_no_answer, _load_csv("no_answer_questions.csv", sample)),
+    ]
+    total = sum(len(s.rows) for s in suites)
+
+    cache_path = CACHE_DIR / f"{config_fingerprint(model)}.jsonl"
     with ResultCache(cache_path, enabled=use_cache) as cache:
-        return [
-            eval_answerable("single_passage_answer_questions.csv", workers, cache, sample),
-            eval_answerable("multi_passage_answer_questions.csv", workers, cache, sample),
-            eval_no_answer("no_answer_questions.csv", workers, cache, sample),
-        ]
+        while any(s.remaining for s in suites):
+            for suite in suites:
+                if should_stop is not None and should_stop():
+                    return [s.score() for s in suites]
+                chunk = suite.remaining[:chunk_size]
+                if not chunk:
+                    continue
+                suite.results.extend(_run_suite(suite.name, chunk, workers, cache, model))
+                done = sum(len(s.results) for s in suites)
+                if on_progress is not None:
+                    on_progress([s.score() for s in suites], done, total)
+
+    return [s.score() for s in suites]
 
 
 def _report(results: list[dict]) -> None:
@@ -214,20 +311,45 @@ def main(argv: list[str] | None = None) -> int:
         help="evaluate N questions per suite instead of all (fixed seed)",
     )
     parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=CHUNK_SIZE,
+        help="questions taken per suite per round (suites are interleaved)",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        choices=list(AVAILABLE_MODELS),
+        help=f"model to benchmark (default {MODEL})",
+    )
+    parser.add_argument(
         "--no-cache",
         action="store_true",
         help="ignore and do not write cached answers",
     )
     args = parser.parse_args(argv)
 
-    fingerprint = config_fingerprint()
+    fingerprint = config_fingerprint(args.model)
     scope = f"sample {args.sample}/suite" if args.sample else "full"
-    print(f"config {fingerprint}, {args.workers} workers, {scope}")
+    print(
+        f"config {fingerprint}, model {args.model or MODEL}, "
+        f"{args.workers} workers, {scope}, chunks of {args.chunk_size}"
+    )
     if not args.no_cache:
         print(f"cache {CACHE_DIR / f'{fingerprint}.jsonl'}")
 
+    def _tick(_metrics: list[dict], done: int, total: int) -> None:
+        print(f"  {done}/{total} questions answered")
+
     try:
-        results = run_all(args.workers, args.sample, use_cache=not args.no_cache)
+        results = run_all(
+            args.workers,
+            args.sample,
+            use_cache=not args.no_cache,
+            model=args.model,
+            chunk_size=args.chunk_size,
+            on_progress=_tick,
+        )
     except KeyboardInterrupt:
         # Every answer completed before the interrupt is already flushed;
         # re-running picks up from there.

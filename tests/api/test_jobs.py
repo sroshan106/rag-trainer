@@ -1,3 +1,4 @@
+import threading
 import time
 import uuid
 
@@ -8,15 +9,20 @@ from src.api.app import app
 client = TestClient(app)
 
 
-def _wait_for_job(job_id: str, timeout: float = 5.0) -> dict:
+def _wait_until(job_id: str, predicate, timeout: float = 5.0) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        resp = client.get(f"/api/jobs/{job_id}")
-        body = resp.json()
-        if body["status"] in ("done", "failed"):
+        body = client.get(f"/api/jobs/{job_id}").json()
+        if predicate(body):
             return body
         time.sleep(0.02)
-    raise AssertionError("job did not finish in time")
+    raise AssertionError("job did not reach the expected state in time")
+
+
+def _wait_for_job(job_id: str, timeout: float = 5.0) -> dict:
+    return _wait_until(
+        job_id, lambda b: b["status"] in ("done", "failed", "cancelled"), timeout
+    )
 
 
 def test_ingest_runs_as_background_job_and_reports_counts(monkeypatch, tmp_path):
@@ -51,7 +57,9 @@ def test_ingest_runs_as_background_job_and_reports_counts(monkeypatch, tmp_path)
 
 def test_benchmark_runs_as_background_job(monkeypatch):
     fake_results = [{"name": "single_passage", "n": 10, "recall@5": 0.9}]
-    monkeypatch.setattr("src.api.routes.benchmark.run_all", lambda w, s, use_cache: fake_results)
+    monkeypatch.setattr(
+        "src.api.routes.benchmark.run_all", lambda *a, **kw: fake_results
+    )
 
     resp = client.post("/api/benchmark", json={"workers": 2, "sample": 5})
     assert resp.status_code == 202
@@ -60,6 +68,71 @@ def test_benchmark_runs_as_background_job(monkeypatch):
     final = _wait_for_job(job_id)
     assert final["status"] == "done"
     assert final["result"] == fake_results
+
+
+def test_benchmark_publishes_partial_results_while_running(monkeypatch):
+    """A run that reports progress must expose metrics before it finishes --
+    otherwise every config change costs a full run before it can be judged."""
+    partial = [{"name": "single_passage", "n": 10, "recall@5": 0.5}]
+    seen = threading.Event()
+
+    def fake_run_all(workers, sample, use_cache, model, chunk_size, on_progress, should_stop):
+        on_progress(partial, 10, 30)
+        seen.wait(timeout=5)
+        return [{"name": "single_passage", "n": 30, "recall@5": 0.7}]
+
+    monkeypatch.setattr("src.api.routes.benchmark.run_all", fake_run_all)
+
+    job_id = client.post("/api/benchmark", json={}).json()["id"]
+    body = _wait_until(job_id, lambda b: b["result"] is not None)
+    assert body["status"] == "running"
+    assert body["result"] == partial
+    assert body["progress"] == 10 / 30
+
+    seen.set()
+    assert _wait_for_job(job_id)["result"][0]["n"] == 30
+
+
+def test_benchmark_cancel_keeps_partial_result(monkeypatch):
+    partial = [{"name": "single_passage", "n": 10, "recall@5": 0.5}]
+
+    def fake_run_all(workers, sample, use_cache, model, chunk_size, on_progress, should_stop):
+        on_progress(partial, 10, 30)
+        while not should_stop():
+            time.sleep(0.01)
+        # Mirrors the real runner: stop early, return what was scored so far.
+        return partial
+
+    monkeypatch.setattr("src.api.routes.benchmark.run_all", fake_run_all)
+
+    job_id = client.post("/api/benchmark", json={}).json()["id"]
+    _wait_until(job_id, lambda b: b["result"] is not None)
+
+    assert client.post(f"/api/jobs/{job_id}/cancel").status_code == 200
+
+    final = _wait_for_job(job_id)
+    assert final["status"] == "cancelled"
+    assert final["result"] == partial
+
+
+def test_cancel_unknown_job_returns_404():
+    assert client.post("/api/jobs/does-not-exist/cancel").status_code == 404
+
+
+def test_cancel_finished_job_returns_409(monkeypatch):
+    monkeypatch.setattr("src.api.routes.benchmark.run_all", lambda *a, **kw: [])
+    job_id = client.post("/api/benchmark", json={}).json()["id"]
+    _wait_for_job(job_id)
+
+    assert client.post(f"/api/jobs/{job_id}/cancel").status_code == 409
+
+
+def test_benchmark_rejects_unknown_model(monkeypatch):
+    monkeypatch.setattr("src.api.routes.benchmark.run_all", lambda *a, **kw: [])
+
+    resp = client.post("/api/benchmark", json={"model": "gpt-nope"})
+
+    assert resp.status_code == 422
 
 
 def test_benchmark_unavailable_returns_503(monkeypatch):

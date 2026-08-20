@@ -87,3 +87,49 @@ def test_delete_all_clears_the_table(db):
 
 def test_get_returns_none_for_an_unknown_id(db):
     assert history.get("no-such-id") is None
+
+
+def test_cancel_keeps_the_partial_answer(db):
+    entry_id = history.start("q", model="m")
+
+    history.cancel(entry_id, "half an ans")
+
+    entry = history.get(entry_id)
+    assert entry["status"] == history.STATUS_CANCELLED
+    assert entry["answer"] == "half an ans"
+
+
+def test_cancel_with_nothing_streamed_leaves_no_answer(db):
+    entry_id = history.start("q")
+
+    history.cancel(entry_id)
+
+    entry = history.get(entry_id)
+    assert entry["status"] == history.STATUS_CANCELLED
+    assert entry["answer"] is None
+
+
+def test_cancel_without_an_entry_is_a_no_op(db):
+    assert history.cancel(None, "text") is None
+
+
+def test_cancel_swallows_a_write_failure(db, monkeypatch):
+    entry_id = history.start("q")
+    monkeypatch.setattr(
+        history, "_engine", lambda connection=None: (_ for _ in ()).throw(OSError("down"))
+    )
+
+    assert history.cancel(entry_id, "partial") is None
+
+
+def test_delete_removes_one_entry(db):
+    keep = record("q1", "a", [])
+    drop = record("q2", "a", [])
+
+    assert history.delete(drop) == 1
+    assert history.get(drop) is None
+    assert history.get(keep) is not None
+
+
+def test_delete_reports_zero_for_an_unknown_id(db):
+    assert history.delete("no-such-id") == 0
