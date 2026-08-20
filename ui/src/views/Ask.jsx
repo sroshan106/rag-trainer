@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import Card from "../components/Card.jsx";
+import {
+  Sparkles,
+  Trash2,
+  AlertCircle,
+  AlertTriangle,
+  Database,
+} from "lucide-react";
 import Exchange from "../components/Exchange.jsx";
 import {
   streamQuery,
@@ -14,10 +20,13 @@ import {
 const MODEL_STORAGE_KEY = "rag:ask:model";
 const PENDING_POLL_MS = 2000;
 
-// The view is a transcript: the in-flight exchange on top, then everything
-// Postgres has, newest first. The answer no longer lives in its own card --
-// rendering it twice (once fresh, once as a history row) was what made a
-// finished query appear to jump.
+const SUGGESTIONS = [
+  "Summarize the main findings in the dataset.",
+  "What are the key concepts and topics discussed?",
+  "What limitations or caveats are mentioned?",
+  "Compare the primary methodologies in the documents.",
+];
+
 export default function Ask() {
   const [query, setQuery] = useState("");
   const [live, setLive] = useState(null);
@@ -38,20 +47,13 @@ export default function Ask() {
       .then(({ models: available }) => {
         setModels(available);
         setModelsLoaded(true);
-        // No server default anymore -- fall back to "" (nothing selected)
-        // rather than guessing, which the Ask button's disabled state
-        // enforces below.
         const saved = localStorage.getItem(MODEL_STORAGE_KEY);
         setModel(saved && available.includes(saved) ? saved : available[0] || "");
       })
-      .catch(() => {
-        // No API yet -- the select stays empty.
-      });
+      .catch(() => {});
     collectionStatus()
       .then(setCollection)
-      .catch(() => {
-        // Can't tell empty from stocked -- say nothing rather than guess.
-      });
+      .catch(() => {});
   }, []);
 
   const refresh = useCallback(async () => {
@@ -70,9 +72,6 @@ export default function Ask() {
     refresh();
   }, [refresh]);
 
-  // Pending rows can come from another tab or the CLI -- this client only sees
-  // its own query through the stream. Poll while any of them are unresolved so
-  // they flip to done without the user having to act.
   const hasPending = history.some((entry) => entry.status === "pending");
   useEffect(() => {
     if (!hasPending) return undefined;
@@ -84,8 +83,6 @@ export default function Ask() {
     abortRef.current?.abort();
   }, []);
 
-  // Abort on unmount too: navigating away should stop the generation, not
-  // leave Ollama producing an answer for a view that no longer exists.
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const ask = useCallback(
@@ -124,13 +121,9 @@ export default function Ask() {
           },
         });
       } catch (err) {
-        // An abort is the Cancel button doing its job, not a failure -- the
-        // server has already recorded the row as cancelled.
         if (err.name !== "AbortError") setError(err.message);
       } finally {
         abortRef.current = null;
-        // Load the stored row before dropping the live one, so the finished
-        // answer never blinks out between the two.
         await refresh();
         setLive(null);
       }
@@ -139,7 +132,7 @@ export default function Ask() {
   );
 
   function onSubmit(e) {
-    e.preventDefault();
+    e?.preventDefault();
     const text = query.trim();
     if (!text || !model || loading) return;
     setQuery("");
@@ -175,9 +168,6 @@ export default function Ask() {
     }
   }
 
-  // Cmd/Ctrl+K focuses the box from anywhere; Escape cancels a running query.
-  // Both are global rather than bound to the input, since the answer is what
-  // the user is looking at while a query runs.
   useEffect(() => {
     function onKeyDown(event) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -193,99 +183,164 @@ export default function Ask() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [cancel]);
 
-  // Up-arrow in an empty box recalls the last question, the way a shell does.
   function onInputKeyDown(event) {
-    if (event.key !== "ArrowUp" || query) return;
-    const last = history[0]?.query;
-    if (!last) return;
-    event.preventDefault();
-    setQuery(last);
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      onSubmit();
+    } else if (event.key === "ArrowUp" && !query) {
+      const last = history[0]?.query;
+      if (last) {
+        event.preventDefault();
+        setQuery(last);
+      }
+    }
   }
 
-  // The live row is also in Postgres as a pending row; hide that copy rather
-  // than show the same question twice.
   const rows = live
     ? history.filter((entry) => !(entry.status === "pending" && entry.query === live.query))
     : history;
 
   return (
-    <div className="flex flex-col gap-4">
-      <Card title="Ask" subtitle="Query the ingested collection through the RAG pipeline.">
-        <form onSubmit={onSubmit} className="flex gap-2">
-          <input
-            ref={inputRef}
-            autoFocus
-            className="flex-1 rounded-md border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-400"
-            placeholder="What would you like to know?    (⌘K)"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onInputKeyDown}
-          />
-          {models.length > 0 && (
-            <select
-              value={model}
-              onChange={(e) => onModelChange(e.target.value)}
-              disabled={loading}
-              className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-2 text-sm disabled:opacity-50 dark:[color-scheme:dark]"
-            >
-              {models.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          )}
-          {loading ? (
-            <button
-              type="button"
-              onClick={cancel}
-              className="rounded-md border border-neutral-300 dark:border-neutral-700 px-4 py-2 text-sm font-medium"
-            >
-              Cancel
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!query.trim() || !model}
-              className="rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 px-4 py-2 text-sm font-medium disabled:opacity-50"
-            >
-              Ask
-            </button>
-          )}
-        </form>
-      </Card>
+    <div className="flex flex-col gap-6 max-w-4xl mx-auto">
+      {/* Page Header */}
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-100">Ask Question</h1>
+        <p className="text-sm text-slate-400 mt-1">Query your knowledge base through the RAG pipeline</p>
+      </div>
 
+      {/* Query Box */}
+      <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-5 shadow-sm">
+        <form onSubmit={onSubmit} className="flex flex-col gap-3">
+          <div className="relative">
+            <textarea
+              ref={inputRef}
+              autoFocus
+              rows={2}
+              className="w-full resize-none rounded-xl border border-slate-700/80 bg-slate-900/90 px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 transition-all font-normal"
+              placeholder="What would you like to know from your documents? (⌘K)"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onInputKeyDown}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-slate-400">Model</span>
+              {models.length > 0 ? (
+                <div className="relative">
+                  <select
+                    value={model}
+                    onChange={(e) => onModelChange(e.target.value)}
+                    disabled={loading}
+                    className="appearance-none rounded-lg border border-slate-700/80 bg-slate-900/90 text-slate-200 px-3 py-1.5 pr-8 text-xs font-mono font-medium focus:outline-none focus:border-blue-500 transition-colors cursor-pointer"
+                  >
+                    {models.map((m) => (
+                      <option key={m} value={m} className="bg-[#111726] text-slate-200">
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+                    <span className="text-[10px]">▼</span>
+                  </div>
+                </div>
+              ) : (
+                <span className="text-xs text-amber-400">No model loaded</span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {loading ? (
+                <button
+                  type="button"
+                  onClick={cancel}
+                  className="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!query.trim() || !model}
+                  className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 text-sm font-medium transition-all shadow-sm shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  <span>Ask</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </form>
+
+        {/* Starter suggestion chips */}
+        {rows.length === 0 && !live && (
+          <div className="mt-4 pt-4 border-t border-slate-800/80">
+            <div className="text-xs font-medium text-slate-400 mb-2.5 flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-blue-400" />
+              <span>Suggested questions:</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {SUGGESTIONS.map((suggestion, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    setQuery(suggestion);
+                    inputRef.current?.focus();
+                  }}
+                  className="text-left text-xs p-2.5 rounded-xl border border-slate-800/80 bg-slate-900/40 hover:bg-slate-800/80 hover:border-slate-700 text-slate-300 transition-all leading-snug"
+                >
+                  "{suggestion}"
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Warnings */}
       {modelsLoaded && models.length === 0 && (
-        <Card className="border-amber-300 dark:border-amber-800">
-          <p className="text-sm">
-            No chat model is downloaded yet, so there is nothing to answer with.{" "}
-            <Link to="/settings" className="font-medium underline">
-              Download one in Settings
-            </Link>{" "}
-            first.
-          </p>
-        </Card>
+        <div className="rounded-xl border border-amber-800/80 bg-amber-950/30 p-4 text-sm text-amber-300 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p>
+              No chat model is downloaded yet.{" "}
+              <Link to="/settings" className="font-semibold underline hover:text-amber-200">
+                Download one in Settings
+              </Link>{" "}
+              to start asking questions.
+            </p>
+          </div>
+        </div>
       )}
 
       {collection?.empty && (
-        <Card className="border-amber-300 dark:border-amber-800">
-          <p className="text-sm">
-            Nothing has been ingested yet, so every question will come back
-            unanswered.{" "}
-            <Link to="/ingest" className="font-medium underline">
-              Upload a dataset
-            </Link>{" "}
-            first.
-          </p>
-        </Card>
+        <div className="rounded-xl border border-amber-800/80 bg-amber-950/30 p-4 text-sm text-amber-300 flex items-start gap-3">
+          <Database className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p>
+              Knowledge base is empty.{" "}
+              <Link to="/ingest" className="font-semibold underline hover:text-amber-200">
+                Ingest a dataset
+              </Link>{" "}
+              first to get answers with grounded citations.
+            </p>
+          </div>
+        </div>
       )}
 
       {error && (
-        <Card title="Error" className="border-red-300 dark:border-red-800">
-          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-        </Card>
+        <div className="rounded-xl border border-rose-800/80 bg-rose-950/40 p-4 text-sm text-rose-300 flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <span className="font-semibold">Error: </span>
+            {error}
+          </div>
+        </div>
       )}
 
+      {/* Live in-flight exchange */}
       {live && (
         <Exchange
           entry={live}
@@ -296,18 +351,14 @@ export default function Ask() {
         />
       )}
 
+      {/* History Error */}
       {historyError && (
-        <Card title="History unavailable" className="border-red-300 dark:border-red-800">
-          <p className="text-sm text-red-600 dark:text-red-400">{historyError}</p>
-        </Card>
+        <div className="rounded-xl border border-rose-800/80 bg-rose-950/40 p-4 text-sm text-rose-300">
+          History unavailable: {historyError}
+        </div>
       )}
 
-      {!historyError && rows.length === 0 && !live && (
-        <Card>
-          <p className="text-sm text-neutral-500">Nothing asked yet.</p>
-        </Card>
-      )}
-
+      {/* History Items */}
       {rows.map((entry) => (
         <Exchange
           key={entry.id}
@@ -320,15 +371,18 @@ export default function Ask() {
       ))}
 
       {rows.length > 0 && (
-        <div>
+        <div className="flex justify-end pt-2">
           <button
+            type="button"
             onClick={onClear}
-            className="rounded-md border border-neutral-300 dark:border-neutral-700 px-3 py-1.5 text-xs"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-900/60 hover:bg-rose-950/40 hover:border-rose-900/60 text-slate-400 hover:text-rose-400 text-xs transition-colors"
           >
-            Clear history
+            <Trash2 className="h-3.5 w-3.5" />
+            <span>Clear all history</span>
           </button>
         </div>
       )}
     </div>
   );
 }
+

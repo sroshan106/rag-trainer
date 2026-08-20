@@ -1,40 +1,55 @@
-// Citations render as links because the corpus is web-scraped and the URL is
-// the only part of a source that means anything outside this machine. Rows
-// without a usable URL still render, as plain text rather than a dead link.
-//
-// `compact` drops the heading/border, for use inside something that already
-// has its own layout -- e.g. a table cell.
+import { ExternalLink, FileText } from "lucide-react";
+
 export default function SourceList({ sources, title = "Sources", compact = false }) {
   if (!sources || sources.length === 0) return null;
+
   return (
-    <div className={compact ? "" : "mt-4 pt-3 border-t border-neutral-200 dark:border-neutral-800"}>
+    <div className={compact ? "" : "mt-4 pt-3.5 border-t border-slate-800/80"}>
       {!compact && (
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
-          {title}
-        </h3>
+        <div className="flex items-center gap-2 mb-2.5">
+          <FileText className="h-3.5 w-3.5 text-slate-400" />
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            {title} ({sources.length})
+          </h3>
+        </div>
       )}
-      <ul className="text-xs space-y-1">
+      <div className="flex flex-wrap gap-2">
         {sources.map((src, i) => {
           const isLink = typeof src === "string" && /^https?:\/\//.test(src);
-          return (
-            <li key={i} className="flex gap-2">
-              <span className="text-neutral-400 shrink-0">[{i + 1}]</span>
-              {isLink ? (
-                <a
-                  href={src}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-blue-600 dark:text-blue-400 hover:underline break-all"
-                >
-                  {src}
-                </a>
-              ) : (
-                <span className="break-all text-neutral-500">{src}</span>
-              )}
-            </li>
+          let hostname = "";
+          if (isLink) {
+            try {
+              hostname = new URL(src).hostname.replace(/^www\./, "");
+            } catch {
+              hostname = src;
+            }
+          }
+
+          return isLink ? (
+            <a
+              key={i}
+              href={src}
+              target="_blank"
+              rel="noreferrer"
+              title={src}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/60 hover:bg-slate-800 hover:border-slate-700 text-xs text-blue-400 hover:text-blue-300 transition-all max-w-full"
+            >
+              <span className="font-mono text-[10px] text-slate-500 font-semibold">[{i + 1}]</span>
+              <span className="truncate max-w-xs">{hostname || src}</span>
+              <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
+            </a>
+          ) : (
+            <div
+              key={i}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/60 text-xs text-slate-400 max-w-full"
+            >
+              <span className="font-mono text-[10px] text-slate-500 font-semibold">[{i + 1}]</span>
+              <span className="truncate max-w-xs">{src}</span>
+            </div>
           );
         })}
-      </ul>
+      </div>
     </div>
   );
 }
+

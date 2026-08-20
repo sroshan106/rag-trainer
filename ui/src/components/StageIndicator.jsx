@@ -1,11 +1,9 @@
-// The three graph nodes, shown as they run. Retrieval and grading are fast;
-// generation is the one that can take minutes on this hardware -- so the value
-// here is less "progress" than "which slow thing am I waiting on", plus the
-// counts each stage produced (20 fetched, 5 kept) as proof it is doing work.
+import { Search, CheckCircle2, Sparkles, ArrowRight } from "lucide-react";
+
 const STAGES = [
-  { key: "retrieve", label: "Retrieving" },
-  { key: "grade", label: "Grading" },
-  { key: "generate", label: "Generating" },
+  { key: "retrieve", label: "Retrieving", icon: Search },
+  { key: "grade", label: "Grading", icon: CheckCircle2 },
+  { key: "generate", label: "Generating", icon: Sparkles },
 ];
 
 function describe(stage, detail) {
@@ -20,31 +18,41 @@ export default function StageIndicator({ stage, detail, streaming }) {
   const note = describe(stage, detail);
 
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
+    <div className="flex flex-wrap items-center gap-2 p-2.5 rounded-xl border border-slate-800 bg-slate-900/60 text-xs">
       {STAGES.map((s, i) => {
+        const Icon = s.icon;
         const done = i < current || (streaming && s.key === "generate");
         const active = i === current && !done;
+
         return (
-          <span key={s.key} className="flex items-center gap-2">
-            {i > 0 && <span className="text-neutral-300 dark:text-neutral-700">·</span>}
+          <div key={s.key} className="flex items-center gap-2">
+            {i > 0 && <ArrowRight className="h-3 w-3 text-slate-600" />}
             <span
-              className={
-                done
-                  ? "text-neutral-500"
-                  : active
-                    ? "font-medium text-neutral-900 dark:text-neutral-100"
-                    : "text-neutral-400 dark:text-neutral-600"
-              }
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
+                active
+                  ? "bg-blue-600/20 text-blue-400 border border-blue-500/40 font-medium"
+                  : done
+                    ? "bg-emerald-950/40 text-emerald-400 border border-emerald-800/40"
+                    : "text-slate-500 bg-slate-900/40 border border-slate-800/60"
+              }`}
             >
-              {active && (
-                <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500 align-middle" />
-              )}
-              {s.label}
+              <Icon
+                className={`h-3.5 w-3.5 ${
+                  active ? "animate-pulse text-blue-400" : done ? "text-emerald-400" : "text-slate-500"
+                }`}
+              />
+              <span>{s.label}</span>
+              {active && <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-ping" />}
             </span>
-          </span>
+          </div>
         );
       })}
-      {note && <span className="text-neutral-500">— {note}</span>}
+      {note && (
+        <span className="ml-auto text-[11px] font-mono text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60">
+          {note}
+        </span>
+      )}
     </div>
   );
 }
+

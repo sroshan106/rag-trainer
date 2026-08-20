@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import Card from "../components/Card.jsx";
+import {
+  DownloadCloud,
+  CheckCircle2,
+  Cpu,
+  Database,
+  Layers,
+  Zap,
+  HardDrive,
+  AlertCircle,
+} from "lucide-react";
 import StatusBadge from "../components/StatusBadge.jsx";
 import { listModelCatalog, pullModel, pullHistory, pollJob } from "../api.js";
 
@@ -141,15 +150,17 @@ const DEFAULT_RERANK_CATALOG = [
   "jinaai/jina-reranker-v2-base-multilingual",
 ];
 
-// All three model kinds are optional at any given moment -- nothing is
-// force-downloaded at container startup anymore (see docker-compose.yml).
-// This view is the only place a download actually happens.
+const TABS = [
+  { key: "chat", label: "Chat Models", icon: Cpu },
+  { key: "embed", label: "Embeddings", icon: Database },
+  { key: "rerank", label: "Rerankers", icon: Layers },
+];
+
 export default function Settings() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
-  // Keyed by model name so several rows can download independently and each
-  // shows its own progress bar / status.
   const [jobs, setJobs] = useState({});
+  const [activeTab, setActiveTab] = useState("chat");
   const cancelledRef = useRef(false);
 
   function refresh() {
@@ -160,7 +171,6 @@ export default function Settings() {
     cancelledRef.current = false;
     refresh();
 
-    // Reconnect to in-flight pulls (survives page refresh mid-download).
     pullHistory()
       .then((history) => {
         for (const j of history) {
@@ -205,80 +215,127 @@ export default function Settings() {
   const rerankModels = data?.rerank_models || DEFAULT_RERANK_CATALOG;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-6 max-w-4xl mx-auto">
+      {/* Page Header */}
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-100">Model Management</h1>
+        <p className="text-sm text-slate-400 mt-1">
+          Download and manage LLM generators, embedding models, and cross-encoders
+        </p>
+      </div>
+
       {error && (
-        <div className="rounded-md border border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300 px-3 py-2 text-sm">
-          {error}
+        <div className="rounded-xl border border-rose-800/80 bg-rose-950/40 p-4 text-sm text-rose-300 flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <span className="font-semibold">Error: </span>
+            {error}
+          </div>
         </div>
       )}
 
-      <Card
-        title="Chat models"
-        subtitle="Selectable in Ask and Benchmark once downloaded. Interchangeable -- pick any that's installed."
-      >
-        <ModelTable
-          rows={data?.catalog.map((m) => ({
-            name: m,
-            installed: data.installed.includes(m),
-          }))}
-          infoMap={infoMap}
-          job={(m) => jobs[m]}
-          onDownload={download}
-        />
-      </Card>
+      {/* Tab Selector */}
+      <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#111726]/90 border border-slate-800 self-start">
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                isActive
+                  ? "bg-blue-600 text-white shadow-sm shadow-blue-500/20"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
 
-      <Card
-        title="Embedding models"
-        subtitle={
-          data
-            ? `Downloadable for vectorization and retrieval (active embedder: ${data.active_embed_model || "nomic-embed-text"}).`
-            : "Downloadable for vectorization and retrieval."
-        }
-      >
-        <ModelTable
-          rows={data?.embed_models.map((m) => ({
-            name: m,
-            installed: data.embed_installed.includes(m),
-            active: (data.active_embed_model || "nomic-embed-text") === m,
-          }))}
-          infoMap={infoMap}
-          job={(m) => jobs[m]}
-          onDownload={download}
-        />
-      </Card>
-
-      <Card
-        title="Reranker models"
-        subtitle={
-          data
-            ? `${data.rerank_enabled ? "Enabled" : "Disabled"} via RAG_RERANK (active: ${data.active_rerank_model || data.rerank_model}). Pre-download any reranker from HuggingFace to cache locally.`
-            : "Pre-download cross-encoder models from HuggingFace to cache locally."
-        }
-      >
-        <ModelTable
-          rows={rerankModels.map((m) => {
-            const isInstalled = Array.isArray(data?.rerank_installed)
-              ? data.rerank_installed.includes(m)
-              : data?.rerank_installed && m === data?.rerank_model;
-            return {
+      {/* Tab Panels */}
+      {activeTab === "chat" && (
+        <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
+          <div className="mb-4 pb-3 border-b border-slate-800/80">
+            <h2 className="text-base font-bold text-slate-100">Chat Generation Models</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Downloaded models are instantly available in Ask and Benchmark views
+            </p>
+          </div>
+          <ModelTable
+            rows={data?.catalog.map((m) => ({
               name: m,
-              installed: isInstalled,
-              active: (data?.active_rerank_model || data?.rerank_model) === m,
-            };
-          })}
-          infoMap={infoMap}
-          job={(m) => jobs[m]}
-          onDownload={download}
-        />
-      </Card>
+              installed: data.installed.includes(m),
+            }))}
+            infoMap={infoMap}
+            job={(m) => jobs[m]}
+            onDownload={download}
+          />
+        </div>
+      )}
+
+      {activeTab === "embed" && (
+        <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
+          <div className="mb-4 pb-3 border-b border-slate-800/80">
+            <h2 className="text-base font-bold text-slate-100">Vector Embedding Models</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {data
+                ? `Active vector embedding model: ${data.active_embed_model || "nomic-embed-text"}`
+                : "Downloadable models for vectorizing document chunks"}
+            </p>
+          </div>
+          <ModelTable
+            rows={data?.embed_models.map((m) => ({
+              name: m,
+              installed: data.embed_installed.includes(m),
+              active: (data.active_embed_model || "nomic-embed-text") === m,
+            }))}
+            infoMap={infoMap}
+            job={(m) => jobs[m]}
+            onDownload={download}
+          />
+        </div>
+      )}
+
+      {activeTab === "rerank" && (
+        <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
+          <div className="mb-4 pb-3 border-b border-slate-800/80">
+            <h2 className="text-base font-bold text-slate-100">Cross-Encoder Reranker Models</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {data
+                ? `Status: ${data.rerank_enabled ? "Enabled" : "Disabled"} (Active model: ${data.active_rerank_model || data.rerank_model})`
+                : "Pre-download cross-encoder models from HuggingFace to cache locally"}
+            </p>
+          </div>
+          <ModelTable
+            rows={rerankModels.map((m) => {
+              const isInstalled = Array.isArray(data?.rerank_installed)
+                ? data.rerank_installed.includes(m)
+                : data?.rerank_installed && m === data?.rerank_model;
+              return {
+                name: m,
+                installed: isInstalled,
+                active: (data?.active_rerank_model || data?.rerank_model) === m,
+              };
+            })}
+            infoMap={infoMap}
+            job={(m) => jobs[m]}
+            onDownload={download}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
 function ModelTable({ rows, infoMap, job, onDownload }) {
-  if (!rows) return <div className="text-sm text-neutral-500">Loading...</div>;
+  if (!rows) return <div className="py-8 text-center text-xs text-slate-500">Loading catalog...</div>;
   return (
-    <div className="flex flex-col divide-y divide-neutral-200 dark:divide-neutral-800">
+    <div className="flex flex-col divide-y divide-slate-800/70">
       {rows.map((row) => (
         <ModelRow
           key={row.name}
@@ -301,77 +358,82 @@ function ModelRow({ row, info, job, onDownload }) {
   const description = info?.description;
 
   return (
-    <div className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-            {row.name}
-          </span>
+          <span className="font-mono text-sm font-bold text-slate-100">{row.name}</span>
+
           {row.active && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-              active
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
+              Active
             </span>
           )}
           {minVram && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800">
-              Min VRAM: {minVram}
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-blue-950/60 text-blue-300 border border-blue-800/60">
+              <Zap className="h-3 w-3" />
+              {minVram}
             </span>
           )}
           {diskSize && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-normal bg-neutral-100 text-neutral-600 border border-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:border-neutral-700">
-              Disk: {diskSize}
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono text-slate-400 bg-slate-900/80 border border-slate-800">
+              <HardDrive className="h-3 w-3 text-slate-500" />
+              {diskSize}
             </span>
           )}
           {params && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-normal bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono text-slate-400 bg-slate-900/80 border border-slate-800">
               {params}
             </span>
           )}
         </div>
 
         {(context || description) && (
-          <div className="mt-1 text-xs text-neutral-500 dark:text-neutral-400 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            {context && <span className="font-mono text-neutral-600 dark:text-neutral-300">{context}</span>}
-            {context && description && <span className="text-neutral-300 dark:text-neutral-600">•</span>}
+          <div className="mt-1 text-xs text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            {context && <span className="font-mono text-slate-300">{context}</span>}
+            {context && description && <span className="text-slate-600">•</span>}
             {description && <span>{description}</span>}
           </div>
         )}
 
         {busy && (
-          <div className="mt-2">
-            <div className="h-1.5 w-full max-w-xs rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
+          <div className="mt-2.5 max-w-sm">
+            <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
               <div
-                className="h-full bg-blue-500 transition-all"
+                className="h-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-all"
                 style={{ width: `${Math.round((job.progress ?? 0) * 100)}%` }}
               />
             </div>
-            <div className="text-xs text-neutral-500 mt-0.5 truncate">{job.message}</div>
+            <div className="text-[11px] text-slate-400 mt-1 truncate">{job.message}</div>
           </div>
         )}
+
         {job && !busy && job.status !== "done" && (
           <div className="text-xs mt-1.5">
             <StatusBadge status={job.status} />
-            {job.error && <span className="ml-2 text-red-600 dark:text-red-400">{job.error}</span>}
+            {job.error && <span className="ml-2 text-rose-400">{job.error}</span>}
           </div>
         )}
       </div>
 
       <div className="flex-shrink-0 flex items-center gap-2 self-start sm:self-center">
         {row.installed ? (
-          <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-green-100 text-green-700 dark:bg-green-900/60 dark:text-green-300">
-            installed
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80">
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+            <span>Installed</span>
           </span>
         ) : (
           <button
             type="button"
             disabled={busy}
             onClick={() => onDownload(row.name)}
-            className="text-sm font-medium px-3.5 py-1.5 rounded-md bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-all shadow-sm shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
-            {busy ? "Downloading..." : "Download"}
+            <DownloadCloud className="h-3.5 w-3.5" />
+            <span>{busy ? "Downloading..." : "Download"}</span>
           </button>
         )}
       </div>
     </div>
   );
 }
+

@@ -1,17 +1,28 @@
 const STYLES = {
-  pending: "bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300",
-  running: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
-  done: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
-  failed: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
-  // Distinct from failed: a cancelled job stopped on request and its partial
-  // result is still worth reading.
-  cancelled: "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300",
+  pending: "bg-slate-800 text-slate-300 border-slate-700",
+  running: "bg-blue-950/80 text-blue-400 border-blue-800/80 animate-pulse",
+  done: "bg-emerald-950/80 text-emerald-300 border-emerald-800/70",
+  failed: "bg-rose-950/80 text-rose-300 border-rose-800/70",
+  cancelled: "bg-amber-950/80 text-amber-300 border-amber-800/70",
+};
+
+const DOT_COLORS = {
+  pending: "bg-slate-400",
+  running: "bg-blue-400 animate-ping",
+  done: "bg-emerald-400",
+  failed: "bg-rose-400",
+  cancelled: "bg-amber-400",
 };
 
 export default function StatusBadge({ status }) {
+  const badgeClass = STYLES[status] || "bg-slate-800 text-slate-300 border-slate-700";
+  const dotClass = DOT_COLORS[status] || "bg-slate-400";
+
   return (
-    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STYLES[status] ?? ""}`}>
-      {status}
+    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-0.5 rounded-full border ${badgeClass}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
+      <span className="capitalize">{status}</span>
     </span>
   );
 }
+

@@ -9,6 +9,7 @@ anything about threading.
 
 import asyncio
 import json
+import threading
 
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
@@ -70,23 +71,51 @@ async def event_generator(request: Request, body: QueryRequest):
     """Bridge ``ask_stream``'s blocking generator onto the event loop.
 
     ``ask_stream`` does blocking work (Postgres, the cross-encoder, Ollama), so
-    each step is pulled in a worker thread -- the same reason the non-streaming
-    route is defined as a sync function. Closing the generator on the way out
-    is what turns a client disconnect into a cancelled query instead of an
-    orphaned one that keeps generating.
+    it is driven on a worker thread. A thread-safe queue delivers events onto the
+    async event loop. Disconnection stops the worker and closes the generator,
+    cancelling Ollama generation cleanly.
     """
-    events = ask_stream(body.query, model=body.model)
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+    stop_event = threading.Event()
     sentinel = object()
+
+    def run_worker():
+        events = None
+        try:
+            events = ask_stream(body.query, model=body.model)
+            for event in events:
+                if stop_event.is_set():
+                    break
+                loop.call_soon_threadsafe(queue.put_nowait, event)
+        except Exception as exc:  # noqa: BLE001
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                {"type": "error", "detail": str(exc)},
+            )
+        finally:
+            if events is not None:
+                events.close()
+            loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+
+    worker_thread = threading.Thread(target=run_worker, daemon=True)
+    worker_thread.start()
+
     try:
         while True:
             if await request.is_disconnected():
+                stop_event.set()
                 break
-            event = await asyncio.to_thread(next, events, sentinel)
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=0.25)
+            except asyncio.TimeoutError:
+                continue
+
             if event is sentinel:
                 break
             yield {"event": event["type"], "data": json.dumps(event)}
     finally:
-        events.close()
+        stop_event.set()
 
 
 @router.post("/stream")

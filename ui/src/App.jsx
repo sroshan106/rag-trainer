@@ -1,4 +1,5 @@
 import { NavLink, Route, Routes, Navigate } from "react-router-dom";
+import { MessageSquare, UploadCloud, Activity, BarChart3, Settings as SettingsIcon, Sparkles } from "lucide-react";
 import Ask from "./views/Ask.jsx";
 import Ingest from "./views/Ingest.jsx";
 import SystemView from "./views/System.jsx";
@@ -6,37 +7,53 @@ import Benchmark from "./views/Benchmark.jsx";
 import Settings from "./views/Settings.jsx";
 
 const NAV = [
-  { to: "/ask", label: "Ask" },
-  { to: "/ingest", label: "Ingest" },
-  { to: "/system", label: "System" },
-  { to: "/benchmark", label: "Benchmark" },
-  { to: "/settings", label: "Settings" },
+  { to: "/ask", label: "Ask", icon: MessageSquare },
+  { to: "/ingest", label: "Ingest", icon: UploadCloud },
+  { to: "/system", label: "System", icon: Activity },
+  { to: "/benchmark", label: "Benchmark", icon: BarChart3 },
+  { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
 function linkClass({ isActive }) {
   return [
-    "px-3 py-2 rounded-md text-sm font-medium transition-colors",
+    "flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all duration-150",
     isActive
-      ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-      : "text-neutral-600 hover:bg-neutral-200 dark:text-neutral-400 dark:hover:bg-neutral-800",
+      ? "bg-blue-600 text-white shadow-sm shadow-blue-500/20"
+      : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60",
   ].join(" ");
 }
 
 export default function App() {
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="border-b border-neutral-200 dark:border-neutral-800">
-        <div className="max-w-6xl mx-auto flex items-center gap-6 px-4 py-3">
-          <span className="font-semibold tracking-tight">RAG Dashboard</span>
-          <nav className="flex gap-1">
-            {NAV.map((item) => (
-              <NavLink key={item.to} to={item.to} className={linkClass}>
-                {item.label}
-              </NavLink>
-            ))}
+    <div className="min-h-screen flex flex-col bg-[#0b0f19] text-slate-100 antialiased">
+      <header className="sticky top-0 z-50 border-b border-slate-800/80 bg-[#0b0f19]/85 backdrop-blur-md">
+        <div className="max-w-6xl mx-auto flex items-center justify-between px-4 py-2.5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 shadow-md shadow-blue-500/20 text-white">
+              <Sparkles className="h-4 w-4" />
+            </div>
+            <div>
+              <span className="font-bold tracking-tight text-slate-100 text-base">RAG Engine</span>
+              <span className="hidden sm:inline-block ml-2 text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                v2.0
+              </span>
+            </div>
+          </div>
+
+          <nav className="flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-800/80">
+            {NAV.map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink key={item.to} to={item.to} className={linkClass}>
+                  <Icon className="h-4 w-4" />
+                  <span>{item.label}</span>
+                </NavLink>
+              );
+            })}
           </nav>
         </div>
       </header>
+
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6">
         <Routes>
           <Route path="/" element={<Navigate to="/ask" replace />} />
@@ -51,3 +68,4 @@ export default function App() {
     </div>
   );
 }
+

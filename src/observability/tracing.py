@@ -84,7 +84,10 @@ def span(name: str):
     finally:
         duration_ms = round((time.perf_counter() - start) * 1000, 1)
         fields = _details.get() or {}
-        _details.reset(token)
+        try:
+            _details.reset(token)
+        except ValueError:
+            _details.set(None)
         _emit({"span": name, "duration_ms": duration_ms, **fields})
 
 
@@ -114,4 +117,7 @@ def collect():
     try:
         yield spans
     finally:
-        _sink.reset(token)
+        try:
+            _sink.reset(token)
+        except ValueError:
+            _sink.set(None)

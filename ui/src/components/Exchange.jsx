@@ -1,26 +1,55 @@
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import {
+  Copy,
+  Check,
+  RotateCcw,
+  Trash2,
+  Clock,
+  Cpu,
+  AlertTriangle,
+  XCircle,
+  HelpCircle,
+  Sparkles,
+} from "lucide-react";
 import SourceList from "./SourceList.jsx";
 import StageIndicator from "./StageIndicator.jsx";
-
-// One question and its answer -- the unit the Ask view is a list of. The same
-// component renders the in-flight exchange and every stored one, so a query
-// doesn't visibly change shape the moment it finishes.
 
 function formatWhen(iso) {
   if (!iso) return null;
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+  if (Number.isNaN(date.getTime())) return iso;
+  const seconds = Math.floor((new Date() - date) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return date.toLocaleDateString();
 }
 
 function Timing({ entry }) {
   if (entry.latency_ms == null) return null;
-  const parts = [`${Math.round(entry.latency_ms)} ms total`];
-  if (entry.rerank_ms != null) parts.push(`rerank ${Math.round(entry.rerank_ms)} ms`);
-  if (entry.generate_ms != null) parts.push(`llm ${Math.round(entry.generate_ms)} ms`);
-  return <span className="text-neutral-500">{parts.join("  ·  ")}</span>;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-slate-400">
+      <span className="flex items-center gap-1 bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-800">
+        <Clock className="h-3 w-3 text-slate-500" />
+        {Math.round(entry.latency_ms)}ms total
+      </span>
+      {entry.rerank_ms != null && (
+        <span className="bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-800">
+          rerank {Math.round(entry.rerank_ms)}ms
+        </span>
+      )}
+      {entry.generate_ms != null && (
+        <span className="bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-800">
+          llm {Math.round(entry.generate_ms)}ms
+        </span>
+      )}
+    </div>
+  );
 }
-
-const ACTION = "text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100";
 
 export default function Exchange({
   entry,
@@ -47,90 +76,133 @@ export default function Exchange({
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // Clipboard is blocked outside a secure context -- nothing to recover.
+      // Clipboard error fallback
     }
   }
 
   return (
-    <section className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-      <div className="flex items-start justify-between gap-4">
-        <button
-          type="button"
-          onClick={() => onReuse?.(entry.query)}
-          title="Put this question back in the box"
-          className="text-left text-sm font-medium leading-snug hover:underline"
-        >
-          {entry.query}
-        </button>
-        <div className="shrink-0 text-[11px] text-neutral-400 text-right">
-          {entry.model && <div className="font-mono">{entry.model}</div>}
-          {formatWhen(entry.created_at) && <div>{formatWhen(entry.created_at)}</div>}
+    <section className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-5 shadow-sm transition-all duration-200">
+      {/* Header: Question + Model & Time */}
+      <div className="flex items-start justify-between gap-4 pb-3 border-b border-slate-800/70">
+        <div className="flex items-start gap-2.5 min-w-0">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-950/70 text-blue-400 border border-blue-800/40 mt-0.5">
+            <HelpCircle className="h-4 w-4" />
+          </div>
+          <button
+            type="button"
+            onClick={() => onReuse?.(entry.query)}
+            title="Click to put this question back in the input box"
+            className="text-left text-sm font-semibold text-slate-100 hover:text-blue-400 transition-colors leading-snug cursor-pointer"
+          >
+            {entry.query}
+          </button>
+        </div>
+
+        <div className="shrink-0 flex items-center gap-2 text-right text-xs">
+          {entry.model && (
+            <span className="flex items-center gap-1 font-mono text-[11px] font-medium px-2 py-0.5 rounded-md bg-blue-950/60 text-blue-300 border border-blue-800/60">
+              <Cpu className="h-3 w-3" />
+              {entry.model}
+            </span>
+          )}
+          {formatWhen(entry.created_at) && (
+            <span className="text-[11px] text-slate-400">{formatWhen(entry.created_at)}</span>
+          )}
         </div>
       </div>
 
+      {/* Live Pipeline Stepper */}
       {live && (
-        <div className="mt-3">
+        <div className="mt-3.5">
           <StageIndicator stage={stage} detail={stageDetail} streaming={streaming} />
         </div>
       )}
+
       {pending && !live && (
-        // A pending row this client isn't streaming -- another tab, or the
-        // CLI. There are no stage events to follow, only the row's status.
-        <p className="mt-3 animate-pulse text-xs text-neutral-500">
-          Running (started elsewhere)…
-        </p>
+        <div className="mt-3 flex items-center gap-2 p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 animate-pulse">
+          <Sparkles className="h-4 w-4 text-blue-400" />
+          <span>Processing query in background...</span>
+        </div>
       )}
 
+      {/* Answer Content with Markdown support */}
       {entry.answer && (
-        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed">
-          {entry.answer}
+        <div className="mt-3.5 text-sm text-slate-200 leading-relaxed prose prose-invert max-w-none prose-p:my-2 prose-pre:bg-slate-950 prose-pre:border prose-pre:border-slate-800 prose-code:text-blue-300 prose-code:bg-slate-900 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.answer}</ReactMarkdown>
           {streaming && (
-            <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-neutral-500 align-text-bottom" />
+            <span className="inline-block h-4 w-1.5 ml-1 bg-blue-500 animate-pulse align-middle" />
           )}
-        </p>
+        </div>
       )}
 
       {failed && (
-        <p className="mt-3 text-sm text-red-600 dark:text-red-400">
-          This query failed before it produced an answer.
-        </p>
-      )}
-      {cancelled && (
-        <p className="mt-2 text-xs text-neutral-500">
-          Cancelled{entry.answer ? " mid-answer." : " before any text arrived."}
-        </p>
-      )}
-      {entry.refused && (
-        <p className="mt-2 text-xs text-neutral-500">
-          No sources survived grading — the collection doesn&apos;t cover this.
-        </p>
+        <div className="mt-3 flex items-center gap-2 p-3 rounded-xl bg-rose-950/40 border border-rose-900/60 text-xs text-rose-300">
+          <XCircle className="h-4 w-4 text-rose-400 shrink-0" />
+          <span>This query encountered an error before producing an answer.</span>
+        </div>
       )}
 
+      {cancelled && (
+        <div className="mt-3 flex items-center gap-2 p-3 rounded-xl bg-amber-950/40 border border-amber-900/60 text-xs text-amber-300">
+          <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+          <span>Cancelled{entry.answer ? " mid-answer." : " before generation."}</span>
+        </div>
+      )}
+
+      {entry.refused && (
+        <div className="mt-3 flex items-center gap-2 p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400">
+          <AlertTriangle className="h-4 w-4 text-slate-500 shrink-0" />
+          <span>No sources survived grading — knowledge base does not cover this question.</span>
+        </div>
+      )}
+
+      {/* Sources list */}
       <SourceList sources={entry.sources} />
 
-      <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-neutral-100 dark:border-neutral-800 pt-2 text-xs">
+      {/* Footer toolbar: Latency stats & Actions */}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800/80 pt-3 text-xs">
         <Timing entry={entry} />
-        <div className="ml-auto flex items-center gap-3">
+
+        <div className="flex items-center gap-2 ml-auto">
           {live ? (
-            <button type="button" onClick={onCancel} className={ACTION}>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-3 py-1 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors"
+            >
               Cancel
             </button>
           ) : (
             <>
               {entry.answer && (
-                <button type="button" onClick={onCopy} className={ACTION}>
-                  {copied ? "Copied" : "Copy"}
+                <button
+                  type="button"
+                  onClick={onCopy}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/60 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-3 w-3 text-emerald-400" />
+                      <span className="text-emerald-400">Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3 w-3 text-slate-400" />
+                      <span>Copy</span>
+                    </>
+                  )}
                 </button>
               )}
+
               {onRerun && models.length > 0 && (
-                <span className="flex items-center gap-1">
+                <div className="flex items-center gap-1 bg-slate-900/80 p-0.5 rounded-lg border border-slate-800">
                   <select
                     value={rerunModel}
                     onChange={(e) => setRerunModel(e.target.value)}
-                    className="rounded border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-1 py-0.5 text-[11px] dark:[color-scheme:dark]"
+                    className="bg-transparent text-slate-300 px-2 py-0.5 text-xs focus:outline-none cursor-pointer"
                   >
                     {models.map((m) => (
-                      <option key={m} value={m} className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100">
+                      <option key={m} value={m} className="bg-[#111726] text-slate-200">
                         {m}
                       </option>
                     ))}
@@ -138,19 +210,22 @@ export default function Exchange({
                   <button
                     type="button"
                     onClick={() => onRerun(entry.query, rerunModel)}
-                    className={ACTION}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition-colors"
                   >
-                    Re-run
+                    <RotateCcw className="h-3 w-3" />
+                    <span>Re-run</span>
                   </button>
-                </span>
+                </div>
               )}
+
               {onDelete && (
                 <button
                   type="button"
                   onClick={() => onDelete(entry)}
-                  className="text-xs text-neutral-500 hover:text-red-600 dark:hover:text-red-400"
+                  className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors"
+                  title="Delete from history"
                 >
-                  Delete
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               )}
             </>
@@ -160,3 +235,4 @@ export default function Exchange({
     </section>
   );
 }
+
