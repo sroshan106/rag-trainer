@@ -8,9 +8,13 @@ import {
   Zap,
   HardDrive,
   AlertCircle,
+  AlertTriangle,
+  Trash2,
+  X,
+  Loader2,
 } from "lucide-react";
 import StatusBadge from "../components/StatusBadge.jsx";
-import { listModelCatalog, pullModel, pullHistory, pollJob } from "../api.js";
+import { listModelCatalog, pullModel, pullHistory, pollJob, deleteModel } from "../api.js";
 
 const DEFAULT_MODEL_METADATA = {
   "llama3.2:3b": {
@@ -161,6 +165,8 @@ export default function Settings() {
   const [error, setError] = useState(null);
   const [jobs, setJobs] = useState({});
   const [activeTab, setActiveTab] = useState("chat");
+  const [modelToDelete, setModelToDelete] = useState(null);
+  const [deletingModel, setDeletingModel] = useState(null);
   const cancelledRef = useRef(false);
 
   function refresh() {
@@ -209,6 +215,21 @@ export default function Settings() {
         if (finalJob?.status === "done") refresh();
       })
       .catch((err) => setError(err.message));
+  }
+
+  async function confirmDelete(model) {
+    setError(null);
+    setDeletingModel(model);
+    try {
+      await deleteModel(model);
+      setModelToDelete(null);
+      refresh();
+    } catch (err) {
+      setError(err.message);
+      setModelToDelete(null);
+    } finally {
+      setDeletingModel(null);
+    }
   }
 
   const infoMap = { ...DEFAULT_MODEL_METADATA, ...(data?.model_info || {}) };
@@ -274,6 +295,8 @@ export default function Settings() {
             infoMap={infoMap}
             job={(m) => jobs[m]}
             onDownload={download}
+            onDeleteRequest={(row, info) => setModelToDelete({ name: row.name, active: row.active, info })}
+            deletingModel={deletingModel}
           />
         </div>
       )}
@@ -297,6 +320,8 @@ export default function Settings() {
             infoMap={infoMap}
             job={(m) => jobs[m]}
             onDownload={download}
+            onDeleteRequest={(row, info) => setModelToDelete({ name: row.name, active: row.active, info })}
+            deletingModel={deletingModel}
           />
         </div>
       )}
@@ -325,14 +350,92 @@ export default function Settings() {
             infoMap={infoMap}
             job={(m) => jobs[m]}
             onDownload={download}
+            onDeleteRequest={(row, info) => setModelToDelete({ name: row.name, active: row.active, info })}
+            deletingModel={deletingModel}
           />
+        </div>
+      )}
+
+      {/* Delete Confirmation Warning Modal */}
+      {modelToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div
+            className="relative w-full max-w-md rounded-2xl border border-slate-800 bg-[#111726] p-6 shadow-2xl shadow-black/80"
+            role="dialog"
+            aria-modal="true"
+          >
+            <button
+              type="button"
+              onClick={() => setModelToDelete(null)}
+              disabled={!!deletingModel}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800/60 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="flex items-start gap-4">
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0">
+                <AlertTriangle className="h-6 w-6 text-amber-400" />
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <h3 className="text-lg font-bold text-slate-100">Delete Model</h3>
+                <p className="text-sm text-slate-300 mt-1">
+                  Are you sure you want to delete <span className="font-mono font-semibold text-amber-300 bg-slate-800/80 px-1.5 py-0.5 rounded">{modelToDelete.name}</span> from local disk?
+                </p>
+                {modelToDelete.info?.disk_size && (
+                  <p className="text-xs text-slate-400 mt-1.5">
+                    This will remove approximately <span className="font-mono text-slate-300 font-medium">{modelToDelete.info.disk_size}</span> of disk space.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {modelToDelete.active && (
+              <div className="mt-4 flex items-start gap-2.5 p-3 rounded-xl bg-amber-950/40 border border-amber-800/60 text-amber-300 text-xs">
+                <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-semibold text-amber-200">Active Model Warning:</span> This model is currently configured as active. Deleting it may cause operations to fail until another active model is configured.
+                </div>
+              </div>
+            )}
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={!!deletingModel}
+                onClick={() => setModelToDelete(null)}
+                className="px-4 py-2 text-xs font-medium rounded-lg text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 transition-all cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!!deletingModel}
+                onClick={() => confirmDelete(modelToDelete.name)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-rose-600 hover:bg-rose-500 text-white transition-all shadow-sm shadow-rose-600/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deletingModel ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Delete Model</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function ModelTable({ rows, infoMap, job, onDownload }) {
+function ModelTable({ rows, infoMap, job, onDownload, onDeleteRequest, deletingModel }) {
   if (!rows) return <div className="py-8 text-center text-xs text-slate-500">Loading catalog...</div>;
   return (
     <div className="flex flex-col divide-y divide-slate-800/70">
@@ -343,19 +446,22 @@ function ModelTable({ rows, infoMap, job, onDownload }) {
           info={infoMap?.[row.name]}
           job={job(row.name)}
           onDownload={onDownload}
+          onDeleteRequest={onDeleteRequest}
+          deletingModel={deletingModel}
         />
       ))}
     </div>
   );
 }
 
-function ModelRow({ row, info, job, onDownload }) {
+function ModelRow({ row, info, job, onDownload, onDeleteRequest, deletingModel }) {
   const busy = job && ["pending", "running"].includes(job.status);
   const minVram = info?.min_vram;
   const diskSize = info?.disk_size;
   const params = info?.params;
   const context = info?.context;
   const description = info?.description;
+  const isDeleting = deletingModel === row.name;
 
   return (
     <div className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -417,10 +523,22 @@ function ModelRow({ row, info, job, onDownload }) {
 
       <div className="flex-shrink-0 flex items-center gap-2 self-start sm:self-center">
         {row.installed ? (
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-            <span>Installed</span>
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Installed</span>
+            </span>
+            <button
+              type="button"
+              disabled={busy || isDeleting}
+              onClick={() => onDeleteRequest?.(row, info)}
+              title="Delete model from disk"
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg text-rose-400 hover:text-rose-200 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 hover:border-rose-700/80 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+            >
+              <Trash2 className="h-3.5 w-3.5 text-rose-400" />
+              <span>{isDeleting ? "Deleting..." : "Delete"}</span>
+            </button>
+          </div>
         ) : (
           <button
             type="button"
@@ -436,4 +554,5 @@ function ModelRow({ row, info, job, onDownload }) {
     </div>
   );
 }
+
 

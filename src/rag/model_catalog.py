@@ -337,3 +337,44 @@ def pull_reranker(model: str = RERANK_MODEL, on_progress=None) -> None:
     rerank.ensure_loaded(model)
     if on_progress:
         on_progress(1.0, "downloaded")
+
+
+def delete_ollama_model(model: str) -> None:
+    """Delete a model from Ollama."""
+    resp = httpx.request(
+        "DELETE",
+        f"{OLLAMA_BASE_URL}/api/delete",
+        json={"model": model},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+
+
+def delete_reranker(model: str = RERANK_MODEL) -> None:
+    """Delete a reranker model from the local HuggingFace cache."""
+    try:
+        from huggingface_hub import CacheNotFound, scan_cache_dir
+    except ImportError:
+        return
+    try:
+        cache = scan_cache_dir()
+        for repo in cache.repos:
+            if repo.repo_id == model:
+                delete_strategy = cache.delete_revisions(*[r.commit_hash for r in repo.revisions])
+                delete_strategy.execute()
+                break
+    except CacheNotFound:
+        pass
+
+
+def delete_model(model: str) -> None:
+    """Delete an Ollama or HuggingFace reranker model from local disk."""
+    is_reranker = (
+        model in RERANK_CATALOG
+        or model == RERANK_MODEL
+    )
+    if is_reranker:
+        delete_reranker(model)
+    else:
+        delete_ollama_model(model)
+

@@ -182,6 +182,10 @@ export function pullHistory() {
   return request("/models/pull/history");
 }
 
+export function deleteModel(model) {
+  return request(`/models/${encodeURIComponent(model)}`, { method: "DELETE" });
+}
+
 export function getMetrics() {
   return request("/metrics");
 }

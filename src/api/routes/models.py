@@ -6,6 +6,7 @@ request open, and the job's ``result`` doubles as the last-seen progress
 fraction so a browser refresh mid-pull still shows something.
 """
 
+import httpx
 from fastapi import APIRouter, HTTPException
 
 from src.api.schemas import JobResponse, PullModelRequest
@@ -84,3 +85,28 @@ def start_pull(body: PullModelRequest) -> dict:
 @router.get("/pull/history", response_model=list[JobResponse])
 def pull_history() -> list[dict]:
     return [j.to_dict() for j in runner.list() if j.kind == "pull"]
+
+
+@router.delete("/{model_name:path}", status_code=200)
+def delete_model(model_name: str) -> dict:
+    try:
+        model_catalog.delete_model(model_name)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=exc.response.status_code,
+            detail=f"Ollama error deleting {model_name}: {exc.response.text}",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not reach Ollama to delete {model_name}: {exc}",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete model {model_name}: {exc}",
+        )
+    return {"status": "deleted", "model": model_name}
+
