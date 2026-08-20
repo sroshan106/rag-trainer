@@ -9,6 +9,8 @@ from langchain_core.documents import Document
 from langchain_ollama import OllamaEmbeddings
 from langchain_postgres import PGVector
 
+from src.db.engine import get_engine
+
 COLLECTION_NAME = "rag_chunks"
 EMBED_MODEL = "nomic-embed-text"
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -77,8 +79,9 @@ def count_chunks(connection: str | None = None) -> int:
     for a COUNT would be the expensive way to answer it. Returns 0 when the
     collection -- or the whole schema -- doesn't exist yet.
     """
-    connection = connection or os.environ["DATABASE_URL"]
-    engine = sa.create_engine(connection)
+    # Shared engine, so the per-page-load count reuses a pool instead of
+    # building and discarding one. Never disposed here for that reason.
+    engine = get_engine(connection)
     try:
         with engine.connect() as conn:
             row = conn.execute(
@@ -87,5 +90,3 @@ def count_chunks(connection: str | None = None) -> int:
         return int(row[0]) if row else 0
     except sa.exc.SQLAlchemyError:
         return 0
-    finally:
-        engine.dispose()

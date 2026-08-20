@@ -43,7 +43,7 @@ def start_pull(body: PullModelRequest) -> dict:
             f"{[*ollama_pullable, model_catalog.RERANK_MODEL]}",
         )
 
-    def _run(reporter: ProgressReporter) -> dict:
+    def _run(reporter: ProgressReporter) -> dict | None:
         reporter.update(progress=0.0, message="starting download")
 
         def on_progress(fraction: float | None, status: str) -> None:
@@ -53,9 +53,20 @@ def start_pull(body: PullModelRequest) -> dict:
             reporter.update(progress=fraction, message=status)
 
         if is_reranker:
+            # The HF download is one opaque blocking call with no hook to poll
+            # from, so cancellation can only be honoured at its edges.
+            reporter.raise_if_cancelled()
             model_catalog.pull_reranker(on_progress)
         else:
-            model_catalog.pull_ollama_model(body.model, on_progress)
+            # Cooperative stop, same as the benchmark job: polled between the
+            # pull's progress lines, so a cancel lands within one line instead
+            # of never (the download previously ran to completion regardless).
+            model_catalog.pull_ollama_model(
+                body.model, on_progress, should_stop=lambda: reporter.cancelled
+            )
+        if reporter.cancelled:
+            reporter.update(message="download cancelled")
+            return None
         return {"model": body.model}
 
     job = runner.submit("pull", _run)

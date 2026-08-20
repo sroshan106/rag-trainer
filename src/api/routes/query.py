@@ -91,5 +91,8 @@ async def event_generator(request: Request, body: QueryRequest):
 
 @router.post("/stream")
 async def stream_query(request: Request, body: QueryRequest) -> EventSourceResponse:
-    _validated_model(body.model)
+    # ``_validated_model`` asks Ollama over blocking HTTP (5s timeout). This
+    # path operation is async, so calling it inline would stall the event loop
+    # -- and every other request with it -- on each stream request.
+    await asyncio.to_thread(_validated_model, body.model)
     return EventSourceResponse(event_generator(request, body))

@@ -27,6 +27,18 @@ TERMINAL_STATUSES = ("done", "failed", "cancelled")
 MAX_FINISHED_JOBS = 200
 
 
+class JobAlreadyRunning(Exception):
+    """Raised by ``JobRunner.submit_exclusive`` when the kind is already busy.
+
+    A domain exception rather than an HTTP one so the runner stays free of
+    FastAPI; the route decides what status code that maps to.
+    """
+
+    def __init__(self, job: "Job"):
+        self.job = job
+        super().__init__(f"a {job.kind} job is already running (job {job.id})")
+
+
 class JobCancelled(Exception):
     """Raised by a job body that noticed its cancel event and stopped early.
 
@@ -51,8 +63,19 @@ class Job:
     # the body is expected to poll ``ProgressReporter.cancelled`` at whatever
     # granularity it can stop cleanly at.
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
+    # The runner hands every job *its* lock, so a snapshot below is taken under
+    # the same lock the worker threads mutate these fields with. Defaults to a
+    # private one so a stand-alone Job is still safe to read.
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def to_dict(self) -> dict:
+        # Under the lock so a poller can't catch a half-updated job -- e.g. a
+        # "running" status next to the progress of the step that just finished.
+        # Never call this while already holding the lock: it is not reentrant.
+        with self.lock:
+            return self._snapshot()
+
+    def _snapshot(self) -> dict:
         return {
             "id": self.id,
             "kind": self.kind,
@@ -112,9 +135,28 @@ class JobRunner:
         self._lock = threading.Lock()
 
     def submit(self, kind: str, fn: Callable[[ProgressReporter], Any]) -> Job:
-        job = Job(id=str(uuid.uuid4()), kind=kind)
+        job = Job(id=str(uuid.uuid4()), kind=kind, lock=self._lock)
         with self._lock:
             self._jobs[job.id] = job
+        return self._start(job, fn)
+
+    def submit_exclusive(self, kind: str, fn: Callable[[ProgressReporter], Any]) -> Job:
+        """Submit, but only if no job of this kind is active.
+
+        The check and the insert happen under one lock acquisition: doing them
+        as two separate calls leaves a window where two concurrent uploads both
+        see "nothing running" and both start embedding.
+        """
+        job = Job(id=str(uuid.uuid4()), kind=kind, lock=self._lock)
+        with self._lock:
+            running = self._active_locked(kind)
+            if running is not None:
+                raise JobAlreadyRunning(running)
+            self._jobs[job.id] = job
+        return self._start(job, fn)
+
+    def _start(self, job: Job, fn: Callable[[ProgressReporter], Any]) -> Job:
+        kind = job.kind
 
         def run() -> None:
             with self._lock:
@@ -160,9 +202,12 @@ class JobRunner:
         the body actually notices and unwinds, so a caller polling the job
         keeps seeing "running" until the stop really took effect.
         """
-        job = self.get(job_id)
-        if job is None or job.status in TERMINAL_STATUSES:
-            return False
+        # Lookup and status read share one acquisition -- reading the status
+        # outside it can see a job that finished between the two.
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status in TERMINAL_STATUSES:
+                return False
         job.cancel_event.set()
         return True
 
@@ -174,11 +219,15 @@ class JobRunner:
         no idea the first one is mid-run.
         """
         with self._lock:
-            for job in self._jobs.values():
-                # A cancelled-but-still-unwinding job still counts as active:
-                # its threads are alive and the GPU is still busy.
-                if job.kind == kind and job.status in ("pending", "running"):
-                    return job
+            return self._active_locked(kind)
+
+    def _active_locked(self, kind: str) -> Job | None:
+        # Caller must already hold ``self._lock`` (it is not reentrant).
+        for job in self._jobs.values():
+            # A cancelled-but-still-unwinding job still counts as active:
+            # its threads are alive and the GPU is still busy.
+            if job.kind == kind and job.status in ("pending", "running"):
+                return job
         return None
 
     def list(self) -> list[Job]:

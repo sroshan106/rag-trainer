@@ -9,6 +9,7 @@ import io
 import pytest
 import sqlalchemy as sa
 
+from src.db import engine as db_engine
 from src.ingestion import files
 
 
@@ -16,7 +17,8 @@ from src.ingestion import files
 def db(tmp_path, monkeypatch):
     """A throwaway database, with the module's engine cache cleared around it."""
     url = f"sqlite:///{tmp_path / 'files.db'}"
-    monkeypatch.setattr(files, "_engines", {})
+    monkeypatch.setattr(db_engine, "_engines", {})
+    monkeypatch.setattr(db_engine, "_initialized", set())
     # JSONB is Postgres-only; the column type is swapped for the SQLite run.
     monkeypatch.setattr(
         files.ingested_files.c.chunk_ids, "type", sa.JSON(), raising=False

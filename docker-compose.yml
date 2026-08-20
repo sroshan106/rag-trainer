@@ -10,12 +10,6 @@ services:
               count: 1
               capabilities: [gpu]
     environment:
-      # This has to live on the server, not the app container -- the app
-      # never reads it, Ollama does. Query-time embedding runs num_gpu=0
-      # (CPU), so it and one GPU-resident chat model fit in 2 slots without
-      # touching VRAM twice -- a cap of 1 was evicting the chat model on
-      # every query (the embed call kicked it out, then generation reloaded
-      # it), not just on an actual model switch.
       OLLAMA_MAX_LOADED_MODELS: "2"
     volumes:
       - ollama_data:/root/.ollama

@@ -17,7 +17,7 @@ from src.ingestion import files as file_history
 from src.ingestion.loaders import UnusableCSV, load_documents
 from src.ingestion.pipeline import ingest
 from src.ingestion.splitter import DEFAULT_SPLITTER, SPLITTERS
-from src.jobs.runner import ProgressReporter, runner
+from src.jobs.runner import JobAlreadyRunning, ProgressReporter, runner
 from src.vectorstore.store import delete_chunks
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
@@ -48,13 +48,16 @@ def _ingest_job(path: str, file_record_id: str, splitter: str):
 
 
 def _submit(path: str, file_record_id: str, splitter: str) -> dict:
-    running = runner.active(JOB_KIND)
-    if running is not None:
+    # The runner decides, not this function: checking here and submitting there
+    # leaves a window where two concurrent uploads both see an idle runner.
+    try:
+        job = runner.submit_exclusive(JOB_KIND, _ingest_job(path, file_record_id, splitter))
+    except JobAlreadyRunning as exc:
         raise HTTPException(
             status_code=409,
-            detail=f"an ingest is already running (job {running.id})",
-        )
-    return runner.submit(JOB_KIND, _ingest_job(path, file_record_id, splitter)).to_dict()
+            detail=f"an ingest is already running (job {exc.job.id})",
+        ) from exc
+    return job.to_dict()
 
 
 @router.get("/splitters")
@@ -71,8 +74,8 @@ def upload_and_ingest(
             status_code=422,
             detail=f"unknown splitter {splitter!r} -- choose from {list(SPLITTERS)}",
         )
-    if runner.active(JOB_KIND) is not None:
-        raise HTTPException(status_code=409, detail="an ingest is already running")
+    # No pre-flight "is an ingest running" check here: the only one that can be
+    # trusted is the one the runner takes atomically with the submit, below.
 
     # The client's filename is used for display only; the stored name is
     # generated, so a crafted name cannot escape the upload directory.
@@ -133,7 +136,14 @@ def upload_and_ingest(
         size_bytes=size,
         documents=documents,
     )
-    return _submit(str(target), record_id, splitter)
+    try:
+        return _submit(str(target), record_id, splitter)
+    except HTTPException:
+        # Lost the race for the single ingest slot. Undo the record and the
+        # saved copy, or a retry would be refused as a duplicate of itself.
+        target.unlink(missing_ok=True)
+        file_history.delete(record_id)
+        raise
 
 
 @router.get("/history", response_model=list[IngestFileEntry])

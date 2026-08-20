@@ -40,11 +40,17 @@ def test_ingest_runs_as_background_job_and_reports_counts(monkeypatch, tmp_path)
 
     monkeypatch.setattr("src.api.routes.ingest.ingest", fake_ingest)
     monkeypatch.setattr("src.api.routes.ingest.UPLOAD_DIR", tmp_path / "uploads")
+    monkeypatch.setattr("src.api.routes.ingest.file_history.find_by_hash", lambda sha256: None)
+    monkeypatch.setattr(
+        "src.api.routes.ingest.file_history.record",
+        lambda filename, stored_path, sha256, size_bytes, documents=None: str(uuid.uuid4()),
+    )
+    monkeypatch.setattr(
+        "src.api.routes.ingest.file_history.set_chunk_ids",
+        lambda entry_id, chunk_ids: None,
+    )
 
-    # Content is unique per run -- this test hits the real dedup table (no
-    # file_history mocking here), and a repeated hash would 409 instead of
-    # exercising the job path.
-    csv = f"index,source_url,text\n1,http://example.com,hello {uuid.uuid4().hex}\n"
+    csv = "index,source_url,text\n1,http://example.com,hello world\n"
     resp = client.post("/api/ingest/upload", files={"file": ("mine.csv", csv, "text/csv")})
     assert resp.status_code == 202
     job_id = resp.json()["id"]

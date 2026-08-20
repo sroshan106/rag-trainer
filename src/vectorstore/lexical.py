@@ -11,11 +11,11 @@ backfilled by Postgres itself.
 """
 
 import os
-import threading
 
 import sqlalchemy as sa
 from langchain_core.documents import Document
 
+from src.db.engine import get_engine
 from src.vectorstore.store import COLLECTION_NAME
 
 TEXT_CONFIG = os.environ.get("RAG_TSVECTOR_CONFIG", "english")
@@ -39,10 +39,6 @@ LIMIT :k
 """
 
 
-_engines: dict[str, sa.Engine] = {}
-_engine_lock = threading.Lock()
-
-
 def _engine(connection: str | None = None) -> sa.Engine:
     """One pooled engine per connection string.
 
@@ -50,15 +46,7 @@ def _engine(connection: str | None = None) -> sa.Engine:
     so building an engine per call would open (and discard) a connection pool
     each time.
     """
-    url = connection or os.environ["DATABASE_URL"]
-    engine = _engines.get(url)
-    if engine is None:
-        with _engine_lock:
-            engine = _engines.get(url)
-            if engine is None:
-                engine = sa.create_engine(url)
-                _engines[url] = engine
-    return engine
+    return get_engine(connection)
 
 
 def ensure_index(connection: str | None = None) -> bool:

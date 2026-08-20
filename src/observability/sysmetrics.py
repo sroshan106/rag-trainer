@@ -19,6 +19,8 @@ import time
 
 import psutil
 
+from src.observability.logging import log
+
 try:
     import pynvml
 
@@ -26,6 +28,11 @@ try:
 except Exception as exc:  # pragma: no cover - exercised only without pynvml installed
     pynvml = None
     _NVML_IMPORT_ERROR = exc
+
+# Every failure NVML itself reports is an ``NVMLError`` subclass. Bound to a
+# name here so the handlers below stay valid even when pynvml is absent (where
+# no NVML call can raise in the first place).
+_NVMLError: type[BaseException] = getattr(pynvml, "NVMLError", Exception)
 
 _NVML_RETRY_COOLDOWN_SECONDS = 30.0
 
@@ -54,7 +61,13 @@ def _ensure_nvml() -> bool:
         _nvml_ready = True
         _nvml_last_fail_time = None
         return True
-    except Exception:
+    except _NVMLError:
+        # The expected outcome on a host with no NVIDIA driver or no GPU --
+        # stays quiet, since that is a configuration, not a fault.
+        _nvml_last_fail_time = time.monotonic()
+        return False
+    except Exception as exc:  # noqa: BLE001 - anything else is a real surprise
+        log("error", "NVML init raised unexpectedly", error=repr(exc))
         _nvml_last_fail_time = time.monotonic()
         return False
 
@@ -81,21 +94,30 @@ def collect_gpu() -> list[dict] | None:
                 "memory_total_mb": round(mem.total / 1_048_576, 1),
                 "memory_pct": round(100 * mem.used / mem.total, 1) if mem.total else 0.0,
             }
+            # Temperature and power are genuinely optional readings -- plenty
+            # of cards (and most virtualized ones) report NVML_ERROR_NOT_
+            # SUPPORTED for them -- so a missing field here is not a fault.
             try:
                 device["temperature_c"] = pynvml.nvmlDeviceGetTemperature(
                     handle, pynvml.NVML_TEMPERATURE_GPU
                 )
-            except Exception:
+            except _NVMLError:
                 pass
             try:
                 device["power_watts"] = round(pynvml.nvmlDeviceGetPowerUsage(handle) / 1000, 1)
-            except Exception:
+            except _NVMLError:
                 pass
             devices.append(device)
         return devices
-    except Exception:
-        # A transient NVML error (e.g. driver hiccup) should degrade this
-        # frame, not take down the whole metrics stream.
+    except _NVMLError as exc:
+        # NVML initialized fine, so this is a real fault (driver hiccup, device
+        # fell off the bus), not an absent GPU -- degrade this frame rather
+        # than take down the metrics stream, but say why: silently returning
+        # None here is what made a broken GPU look like no GPU at all.
+        log("warning", "GPU metrics unavailable: NVML query failed", error=str(exc))
+        return None
+    except Exception as exc:  # noqa: BLE001 - unexpected, but must not kill the stream
+        log("error", "GPU metrics collector raised unexpectedly", error=repr(exc))
         return None
 
 

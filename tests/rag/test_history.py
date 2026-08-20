@@ -8,6 +8,7 @@ is the failure policy: recording must never be able to break a query.
 import pytest
 import sqlalchemy as sa
 
+from src.db import engine as db_engine
 from src.rag import history
 
 
@@ -22,7 +23,8 @@ def record(query, answer, sources, latency_ms=None, model=None):
 def db(tmp_path, monkeypatch):
     """A throwaway database, with the module's engine cache cleared around it."""
     url = f"sqlite:///{tmp_path / 'history.db'}"
-    monkeypatch.setattr(history, "_engines", {})
+    monkeypatch.setattr(db_engine, "_engines", {})
+    monkeypatch.setattr(db_engine, "_initialized", set())
     # JSONB is Postgres-only; the column type is swapped for the SQLite run.
     monkeypatch.setattr(
         history.query_history.c.sources, "type", sa.JSON(), raising=False

@@ -30,6 +30,7 @@ import os
 
 import httpx
 
+from src.observability.logging import log
 from src.rag.nodes import AVAILABLE_MODELS
 from src.vectorstore import rerank
 from src.vectorstore.store import EMBED_MODEL
@@ -51,6 +52,11 @@ EMBED_MODELS = (EMBED_MODEL,)
 RERANK_MODEL = rerank.RERANK_MODEL
 
 _OLLAMA_PULLABLE = (*CATALOG, *EMBED_MODELS)
+
+# Ollama emits a progress line every few hundred milliseconds while a pull is
+# alive, so this is generous for a healthy download and still bounds how long
+# a wedged one can sit there.
+PULL_READ_TIMEOUT_SECONDS = 60.0
 
 
 def _installed_names() -> set[str]:
@@ -100,15 +106,26 @@ def reranker_installed() -> bool:
     exact cost this status check exists to avoid paying on every page load.
     """
     try:
-        from huggingface_hub import scan_cache_dir
-
+        from huggingface_hub import CacheNotFound, scan_cache_dir
+    except ImportError:
+        # No hub library installed -- nothing could have been cached by it, so
+        # "not installed" is the honest answer and there is nothing to report.
+        return False
+    try:
         cache = scan_cache_dir()
-    except Exception:
+    except CacheNotFound:
+        # The expected "never downloaded anything" case: no cache dir yet.
+        return False
+    except Exception as exc:  # noqa: BLE001 - a status check must not 500 the page
+        # An unreadable or corrupt cache is a failed probe, not an absent
+        # model. Still reported as "not installed" so Settings renders, but
+        # no longer silently -- that swallow hid real breakage.
+        log("warning", "reranker cache probe failed", model=RERANK_MODEL, error=repr(exc))
         return False
     return any(repo.repo_id == RERANK_MODEL for repo in cache.repos)
 
 
-def pull_ollama_model(model: str, on_progress) -> None:
+def pull_ollama_model(model: str, on_progress, should_stop=None) -> None:
     """Stream a model pull from Ollama, reporting progress as it downloads.
 
     Ollama's ``/api/pull`` returns newline-delimited JSON, one status object
@@ -116,6 +133,10 @@ def pull_ollama_model(model: str, on_progress) -> None:
     once the manifest resolves, plain status strings before and after. Bytes,
     not layers, are what ``on_progress`` gets: a model is usually one large
     layer, so byte progress is the only granularity worth showing.
+
+    Stopping is cooperative, like the benchmark run: ``should_stop`` is polled
+    between streamed lines, so a cancel lands within one progress line, and
+    leaving the ``stream`` block is what actually aborts the download.
     """
     if model not in _OLLAMA_PULLABLE:
         raise ValueError(f"{model!r} is not downloadable here: {list(_OLLAMA_PULLABLE)}")
@@ -124,10 +145,17 @@ def pull_ollama_model(model: str, on_progress) -> None:
         "POST",
         f"{OLLAMA_BASE_URL}/api/pull",
         json={"model": model},
-        timeout=None,
+        # No overall deadline -- a multi-GB pull legitimately runs for many
+        # minutes -- but a per-read one, so a server that stops sending
+        # progress lines fails instead of hanging this job forever (a hang is
+        # also what made a "cancelled" pull keep running: iter_lines never
+        # came back, so the cancel flag was never polled).
+        timeout=httpx.Timeout(None, connect=10.0, read=PULL_READ_TIMEOUT_SECONDS),
     ) as resp:
         resp.raise_for_status()
         for line in resp.iter_lines():
+            if should_stop is not None and should_stop():
+                return
             if not line:
                 continue
             event = json.loads(line)

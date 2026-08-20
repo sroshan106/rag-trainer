@@ -11,8 +11,6 @@ trail, not turn a working query into an error.
 
 import json
 import logging
-import os
-import threading
 import uuid
 from datetime import datetime, timezone
 
@@ -20,6 +18,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
 from src.config import env_flag
+from src.db.engine import get_engine
 
 logger = logging.getLogger("rag.history")
 
@@ -58,10 +57,6 @@ query_history = sa.Table(
     sa.Column("status", sa.String(16), nullable=False, server_default=STATUS_DONE),
 )
 
-_engines: dict[str, sa.Engine] = {}
-_lock = threading.Lock()
-
-
 def history_enabled() -> bool:
     """Set RAG_HISTORY=false to answer without recording anything."""
     return env_flag("RAG_HISTORY", default=True)
@@ -88,19 +83,15 @@ def _migrate(engine: sa.Engine) -> None:
             conn.execute(sa.text(statement))
 
 
+def _create_table(engine: sa.Engine) -> None:
+    """One-off setup the first time a given database is used."""
+    _metadata.create_all(engine, tables=[query_history])
+    if engine.dialect.name == "postgresql":
+        _migrate(engine)
+
+
 def _engine(connection: str | None = None) -> sa.Engine:
-    url = connection or os.environ["DATABASE_URL"]
-    engine = _engines.get(url)
-    if engine is None:
-        with _lock:
-            engine = _engines.get(url)
-            if engine is None:
-                engine = sa.create_engine(url)
-                _metadata.create_all(engine, tables=[query_history])
-                if engine.dialect.name == "postgresql":
-                    _migrate(engine)
-                _engines[url] = engine
-    return engine
+    return get_engine(connection, init=_create_table)
 
 
 def start(query: str, model: str | None = None, connection: str | None = None) -> str | None:

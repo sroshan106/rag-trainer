@@ -288,11 +288,11 @@ is not reliable with the current model — treat as open item, not blocking MVP.
 
 ## Phase 7: Optional Enhancements (post-MVP)
 
-- [ ] **Re-ranking** — Cohere rerank or cross-encoder model on top-k results before generation (improves precision when k is large). Deferred: `k=5` leaves almost nothing to reorder, and a cross-encoder needs VRAM the 4GB card does not have spare.
+- [x] **Re-ranking** — local cross-encoder (`cross-encoder/ms-marco-MiniLM-L-6-v2`) reorders the fused candidate list before the grader sees it. `src/vectorstore/rerank.py`, on by default, `RAG_RERANK=false` to compare. The original deferral assumed `k=5` with nothing to reorder; hybrid retrieval fetches `RAG_FETCH_K=20` first, which is enough to make reordering meaningful. Runs on CPU (`RAG_RERANK_DEVICE=cpu`), so it costs latency rather than the VRAM the 4GB card does not have spare.
 - [x] **Hybrid search** — Postgres full-text (`ts_rank_cd`) fused with dense retrieval by Reciprocal Rank Fusion. `src/vectorstore/lexical.py` + `src/vectorstore/hybrid.py`, on by default, `RAG_HYBRID=false` to compare. No re-ingest: the tsvector is a generated column over the text pgvector already stored.
 - [ ] **Multi-turn memory** — add conversation history to state, rewrite follow-up queries with context
 - [ ] **Query rewriting/expansion** — LLM rephrases vague queries before retrieval
-- [ ] **Streaming responses** — stream `generate_node` output token-by-token
+- [x] **Streaming responses** — `ask_stream` in `src/rag/graph.py` steps the graph node by node and yields `stage`/`token`/`done`/`error` events; served over SSE by `src/api/routes/query.py` and rendered by the Ask view.
 - [x] **Web UI** — FastAPI (`src/api/`) + React/Vite (`ui/`), with Ask, Ingest, System, and Benchmark views. Phases B and core C of `ui_plan.md`; Phase E (hosted providers, credentials, spend caps) deliberately not built.
 
 ---
@@ -393,7 +393,7 @@ Latency, 12 queries (mixed hits and refusals), single-threaded:
 | Chunk size | 1000 tokens, 100 overlap | retrieval missing context → increase; noisy results → decrease |
 | Embedding model | nomic-embed-text (Ollama, local) | quality insufficient → larger local model or hosted API |
 | LLM | llama3.2:3b (Ollama, local GPU) | quality insufficient → qwen2.5:7b, or hosted API if local ceiling hit |
-| Reranking | off | top-k results noisy/irrelevant → add local cross-encoder rerank |
+| Reranking | on — local cross-encoder on CPU, over the top `RAG_FETCH_K=20` | rerank latency dominates end-to-end time → `RAG_RERANK=false`, or shrink `RAG_RERANK_MAX_LENGTH` |
 
 ## Overall Done Markers
 
@@ -418,6 +418,6 @@ Everything else in this plan is complete. What is deliberately not done:
 | Inline `(source: ...)` citations | `llama3.2:3b` ignores the instruction when handed five chunks, though it does honour it once hybrid grading narrows the context to one or two. Still worked around deterministically in `src/rag/citations.py`. | Unreliable below a larger model |
 | `qwen2.5:7b` evaluation | ~5GB pull, tight on 4GB VRAM. Not attempted — needs explicit go-ahead. | Would likely lift the 0.62 refusal rate |
 | LLM-as-judge answer scoring | Keyword overlap is a regression signal, not an accuracy measure. | Phase 8 follow-up |
-| Re-ranking, multi-turn memory, streaming | Post-MVP. Streaming and multi-turn need the UI's chat surface, which is not built; re-ranking needs VRAM the card lacks. | Phase 7 |
+| Multi-turn memory | The Ask view is a single-shot surface; follow-ups need conversation state plus query rewriting to resolve pronouns against history. Re-ranking and streaming, once grouped here, are both shipped. | Phase 7 |
 | Query rewriting | The remaining Phase 7 item with real upside, and the prerequisite for reinstating a retry loop. Overlaps hybrid search, so it should be measured against the new 0.423 baseline rather than the old one. | Phase 7 |
 | `ui_plan.md` Phases D and E | Traces, Latency, Index views; then hosted providers, credential storage, and spend caps. Phase E is the only part that can spend money. | `ui_plan.md` |

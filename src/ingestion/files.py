@@ -12,8 +12,6 @@ failures here are logged and swallowed, same as query history.
 import hashlib
 import json
 import logging
-import os
-import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +19,8 @@ from typing import BinaryIO
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
+
+from src.db.engine import get_engine
 
 logger = logging.getLogger("rag.files")
 
@@ -46,21 +46,13 @@ ingested_files = sa.Table(
     sa.Column("chunk_ids", JSONB, nullable=True),
 )
 
-_engines: dict[str, sa.Engine] = {}
-_lock = threading.Lock()
+def _create_table(engine: sa.Engine) -> None:
+    """One-off setup the first time a given database is used."""
+    _metadata.create_all(engine, tables=[ingested_files])
 
 
 def _engine(connection: str | None = None) -> sa.Engine:
-    url = connection or os.environ["DATABASE_URL"]
-    engine = _engines.get(url)
-    if engine is None:
-        with _lock:
-            engine = _engines.get(url)
-            if engine is None:
-                engine = sa.create_engine(url)
-                _metadata.create_all(engine, tables=[ingested_files])
-                _engines[url] = engine
-    return engine
+    return get_engine(connection, init=_create_table)
 
 
 def hash_file(fileobj: BinaryIO, chunk_size: int = 1024 * 1024) -> str:
