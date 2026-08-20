@@ -12,7 +12,7 @@ from langchain_postgres import PGVector
 from src.db.engine import get_engine
 
 COLLECTION_NAME = "rag_chunks"
-EMBED_MODEL = "nomic-embed-text"
+EMBED_MODEL = os.environ.get("RAG_EMBED_MODEL", "nomic-embed-text")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 

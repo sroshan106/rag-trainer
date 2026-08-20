@@ -63,6 +63,20 @@ def test_list_models_reports_only_installed_models():
     assert "default" not in body
 
 
+def test_models_catalog_endpoint_includes_requirements():
+    resp = client.get("/api/models")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "catalog" in body
+    assert "model_info" in body
+    assert "llama3.2:3b" in body["model_info"]
+    info = body["model_info"]["llama3.2:3b"]
+    assert "min_vram" in info
+    assert "disk_size" in info
+    assert "params" in info
+
+
 def test_query_rejects_empty_string():
     resp = client.post("/api/query", json={"query": "", "model": TEST_MODEL})
 

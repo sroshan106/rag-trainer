@@ -81,6 +81,7 @@ class JobResponse(BaseModel):
     message: str
     result: object | None = None
     error: str | None = None
+    params: dict | None = None
     created_at: float
     updated_at: float
 

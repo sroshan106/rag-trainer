@@ -23,28 +23,35 @@ def list_models() -> dict:
         "installed": model_catalog.list_installed(),
         "embed_models": list(model_catalog.EMBED_MODELS),
         "embed_installed": model_catalog.embed_models_installed(),
+        "active_embed_model": model_catalog.EMBED_MODEL,
+        "rerank_models": list(model_catalog.RERANK_CATALOG),
+        "rerank_installed": model_catalog.rerankers_installed(),
+        "active_rerank_model": model_catalog.RERANK_MODEL,
         "rerank_model": model_catalog.RERANK_MODEL,
-        "rerank_installed": model_catalog.reranker_installed(),
         # Whether reranking is even switched on (RAG_RERANK) -- shown
         # alongside the download status since a downloaded-but-disabled
         # reranker is a different state than not-downloaded.
         "rerank_enabled": rerank_enabled(),
+        "model_info": model_catalog.MODEL_METADATA,
     }
 
 
 @router.post("/pull", response_model=JobResponse, status_code=202)
 def start_pull(body: PullModelRequest) -> dict:
     ollama_pullable = (*model_catalog.CATALOG, *model_catalog.EMBED_MODELS)
-    is_reranker = body.model == model_catalog.RERANK_MODEL
+    is_reranker = (
+        body.model in model_catalog.RERANK_CATALOG
+        or body.model == model_catalog.RERANK_MODEL
+    )
     if body.model not in ollama_pullable and not is_reranker:
         raise HTTPException(
             status_code=422,
             detail=f"unknown model {body.model!r} -- choose from "
-            f"{[*ollama_pullable, model_catalog.RERANK_MODEL]}",
+            f"{[*ollama_pullable, *model_catalog.RERANK_CATALOG]}",
         )
 
     def _run(reporter: ProgressReporter) -> dict | None:
-        reporter.update(progress=0.0, message="starting download")
+        reporter.update(progress=0.0, message="starting download", result={"model": body.model})
 
         def on_progress(fraction: float | None, status: str) -> None:
             # ``update`` leaves progress untouched when passed None, so a
@@ -56,7 +63,7 @@ def start_pull(body: PullModelRequest) -> dict:
             # The HF download is one opaque blocking call with no hook to poll
             # from, so cancellation can only be honoured at its edges.
             reporter.raise_if_cancelled()
-            model_catalog.pull_reranker(on_progress)
+            model_catalog.pull_reranker(body.model, on_progress)
         else:
             # Cooperative stop, same as the benchmark job: polled between the
             # pull's progress lines, so a cancel lands within one line instead
@@ -70,6 +77,7 @@ def start_pull(body: PullModelRequest) -> dict:
         return {"model": body.model}
 
     job = runner.submit("pull", _run)
+    job.result = {"model": body.model}
     return job.to_dict()
 
 

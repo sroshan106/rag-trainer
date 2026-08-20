@@ -57,6 +57,7 @@ class Job:
     message: str = ""
     result: Any = None
     error: str | None = None
+    params: dict | None = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     # Set by ``JobRunner.cancel``. Cooperative: nothing interrupts the thread,
@@ -84,6 +85,7 @@ class Job:
             "message": self.message,
             "result": self.result,
             "error": self.error,
+            "params": self.params,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -134,20 +136,30 @@ class JobRunner:
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
 
-    def submit(self, kind: str, fn: Callable[[ProgressReporter], Any]) -> Job:
-        job = Job(id=str(uuid.uuid4()), kind=kind, lock=self._lock)
+    def submit(
+        self,
+        kind: str,
+        fn: Callable[[ProgressReporter], Any],
+        params: dict | None = None,
+    ) -> Job:
+        job = Job(id=str(uuid.uuid4()), kind=kind, params=params, lock=self._lock)
         with self._lock:
             self._jobs[job.id] = job
         return self._start(job, fn)
 
-    def submit_exclusive(self, kind: str, fn: Callable[[ProgressReporter], Any]) -> Job:
+    def submit_exclusive(
+        self,
+        kind: str,
+        fn: Callable[[ProgressReporter], Any],
+        params: dict | None = None,
+    ) -> Job:
         """Submit, but only if no job of this kind is active.
 
         The check and the insert happen under one lock acquisition: doing them
         as two separate calls leaves a window where two concurrent uploads both
         see "nothing running" and both start embedding.
         """
-        job = Job(id=str(uuid.uuid4()), kind=kind, lock=self._lock)
+        job = Job(id=str(uuid.uuid4()), kind=kind, params=params, lock=self._lock)
         with self._lock:
             running = self._active_locked(kind)
             if running is not None:

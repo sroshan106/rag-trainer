@@ -127,6 +127,10 @@ export function benchmarkHistory() {
   return request("/benchmark/history");
 }
 
+export function activeBenchmark() {
+  return request("/benchmark/active");
+}
+
 export function queryHistory(limit = 50) {
   return request(`/history?limit=${limit}`);
 }

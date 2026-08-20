@@ -43,13 +43,170 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # there is no reason to let the pull endpoint accept an arbitrary name.
 CATALOG = AVAILABLE_MODELS
 
-# Not a choice: the one embedding model every ingested chunk was vectorized
-# with (src.vectorstore.store.COLLECTION_NAME is keyed on it). Exposed
-# separately so Settings can show/download it once without offering it as an
-# alternative next to the chat models.
-EMBED_MODELS = (EMBED_MODEL,)
+# Embedding models compatible with 4GB VRAM GPU. Exposed in Settings for download.
+_DEFAULT_EMBED_MODELS = (
+    "nomic-embed-text",
+    "all-minilm",
+    "bge-m3",
+    "bge-small",
+    "mxbai-embed-large",
+    "snowflake-arctic-embed",
+)
+EMBED_MODELS = (
+    _DEFAULT_EMBED_MODELS
+    if EMBED_MODEL in _DEFAULT_EMBED_MODELS
+    else (EMBED_MODEL, *_DEFAULT_EMBED_MODELS)
+)
 
 RERANK_MODEL = rerank.RERANK_MODEL
+
+# Reranker models exposed in Settings for download and local caching.
+_DEFAULT_RERANK_MODELS = (
+    "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "cross-encoder/ms-marco-MiniLM-L-12-v2",
+    "BAAI/bge-reranker-base",
+    "BAAI/bge-reranker-large",
+    "mixedbread-ai/mxbai-rerank-base-v1",
+    "jinaai/jina-reranker-v2-base-multilingual",
+)
+RERANK_CATALOG = (
+    _DEFAULT_RERANK_MODELS
+    if RERANK_MODEL in _DEFAULT_RERANK_MODELS
+    else (RERANK_MODEL, *_DEFAULT_RERANK_MODELS)
+)
+
+# Minimum hardware requirements, sizes, and architectural metadata for models.
+MODEL_METADATA = {
+    # Chat models
+    "llama3.2:3b": {
+        "min_vram": "3 GB",
+        "disk_size": "~2.0 GB",
+        "params": "3.2B",
+        "context": "128k ctx",
+        "description": "Fast, balanced general QA with low latency and strong instruction following.",
+    },
+    "llama3.2:1b": {
+        "min_vram": "1.5 GB",
+        "disk_size": "~1.3 GB",
+        "params": "1.2B",
+        "context": "128k ctx",
+        "description": "Ultra-lightweight edge model with minimal memory footprint.",
+    },
+    "qwen3:4b": {
+        "min_vram": "3.5 GB",
+        "disk_size": "~2.6 GB",
+        "params": "4B",
+        "context": "32k ctx",
+        "description": "Strong reasoning, multilingual support, and coding capabilities.",
+    },
+    "qwen2.5:3b": {
+        "min_vram": "3 GB",
+        "disk_size": "~1.9 GB",
+        "params": "3.1B",
+        "context": "32k ctx",
+        "description": "High instruction following, structured output, and coding ability.",
+    },
+    "gemma2:2b": {
+        "min_vram": "2.5 GB",
+        "disk_size": "~1.6 GB",
+        "params": "2.6B",
+        "context": "8k ctx",
+        "description": "Google lightweight conversational and knowledge retrieval model.",
+    },
+    "phi3.5": {
+        "min_vram": "3.5 GB",
+        "disk_size": "~2.2 GB",
+        "params": "3.8B",
+        "context": "128k ctx",
+        "description": "Microsoft compact reasoning model with high benchmark performance.",
+    },
+    # Embedding models
+    "nomic-embed-text": {
+        "min_vram": "500 MB",
+        "disk_size": "~274 MB",
+        "params": "137M",
+        "context": "8192 ctx • 768 dim",
+        "description": "Default embedding model for vectorstore retrieval with large context window.",
+    },
+    "all-minilm": {
+        "min_vram": "250 MB",
+        "disk_size": "~120 MB",
+        "params": "33M",
+        "context": "256 ctx • 384 dim",
+        "description": "Extremely fast, lightweight sentence embeddings.",
+    },
+    "bge-m3": {
+        "min_vram": "1.5 GB",
+        "disk_size": "~1.2 GB",
+        "params": "568M",
+        "context": "8192 ctx • 1024 dim",
+        "description": "Multilingual embeddings supporting dense, sparse, and multi-vector search.",
+    },
+    "bge-small": {
+        "min_vram": "200 MB",
+        "disk_size": "~67 MB",
+        "params": "24M",
+        "context": "512 ctx • 384 dim",
+        "description": "Minimal memory footprint embedding model for resource-constrained setups.",
+    },
+    "mxbai-embed-large": {
+        "min_vram": "1.0 GB",
+        "disk_size": "~670 MB",
+        "params": "335M",
+        "context": "512 ctx • 1024 dim",
+        "description": "High retrieval accuracy representation model for English corpus.",
+    },
+    "snowflake-arctic-embed": {
+        "min_vram": "1.0 GB",
+        "disk_size": "~669 MB",
+        "params": "335M",
+        "context": "512 ctx • 1024 dim",
+        "description": "Enterprise-grade retrieval embedding model by Snowflake.",
+    },
+    # Reranker models
+    "cross-encoder/ms-marco-MiniLM-L-6-v2": {
+        "min_vram": "300 MB",
+        "disk_size": "~80 MB",
+        "params": "22.7M",
+        "context": "512 ctx",
+        "description": "Fast cross-encoder reranker for passage re-ranking and noise filtering.",
+    },
+    "cross-encoder/ms-marco-MiniLM-L-12-v2": {
+        "min_vram": "400 MB",
+        "disk_size": "~130 MB",
+        "params": "33M",
+        "context": "512 ctx",
+        "description": "12-layer variant of MiniLM offering higher precision while remaining fast.",
+    },
+    "BAAI/bge-reranker-base": {
+        "min_vram": "1.5 GB",
+        "disk_size": "~1.1 GB",
+        "params": "278M",
+        "context": "512 ctx",
+        "description": "High-accuracy multilingual cross-encoder reranker (100+ languages).",
+    },
+    "BAAI/bge-reranker-large": {
+        "min_vram": "2.5 GB",
+        "disk_size": "~2.2 GB",
+        "params": "560M",
+        "context": "512 ctx",
+        "description": "Top-tier accuracy reranker for demanding retrieval benchmarks.",
+    },
+    "mixedbread-ai/mxbai-rerank-base-v1": {
+        "min_vram": "800 MB",
+        "disk_size": "~500 MB",
+        "params": "135M",
+        "context": "512 ctx",
+        "description": "State-of-the-art English reranking precision designed for RAG pipelines.",
+    },
+    "jinaai/jina-reranker-v2-base-multilingual": {
+        "min_vram": "1.2 GB",
+        "disk_size": "~560 MB",
+        "params": "278M",
+        "context": "8192 ctx",
+        "description": "Supports long-context reranking up to 8k tokens and multi-language queries.",
+    },
+}
 
 _OLLAMA_PULLABLE = (*CATALOG, *EMBED_MODELS)
 
@@ -98,31 +255,31 @@ def embed_models_installed() -> list[str]:
     return [m for m in EMBED_MODELS if _is_installed(m, names)]
 
 
-def reranker_installed() -> bool:
-    """Whether RERANK_MODEL is already in the local HuggingFace cache.
+def rerankers_installed() -> list[str]:
+    """Reranker models from RERANK_CATALOG actually present in local HuggingFace cache."""
+    try:
+        from huggingface_hub import CacheNotFound, scan_cache_dir
+    except ImportError:
+        return []
+    try:
+        cache = scan_cache_dir()
+    except CacheNotFound:
+        return []
+    except Exception as exc:  # noqa: BLE001 - a status check must not 500 the page
+        log("warning", "reranker cache probe failed", error=repr(exc))
+        return []
+    cached_repos = {repo.repo_id for repo in cache.repos}
+    return [m for m in RERANK_CATALOG if m in cached_repos]
+
+
+def reranker_installed(model: str = RERANK_MODEL) -> bool:
+    """Whether a specific reranker model is in the local HuggingFace cache.
 
     Scans the cache rather than instantiating ``CrossEncoder`` -- loading the
     model just to check whether loading it would download something is the
     exact cost this status check exists to avoid paying on every page load.
     """
-    try:
-        from huggingface_hub import CacheNotFound, scan_cache_dir
-    except ImportError:
-        # No hub library installed -- nothing could have been cached by it, so
-        # "not installed" is the honest answer and there is nothing to report.
-        return False
-    try:
-        cache = scan_cache_dir()
-    except CacheNotFound:
-        # The expected "never downloaded anything" case: no cache dir yet.
-        return False
-    except Exception as exc:  # noqa: BLE001 - a status check must not 500 the page
-        # An unreadable or corrupt cache is a failed probe, not an absent
-        # model. Still reported as "not installed" so Settings renders, but
-        # no longer silently -- that swallow hid real breakage.
-        log("warning", "reranker cache probe failed", model=RERANK_MODEL, error=repr(exc))
-        return False
-    return any(repo.repo_id == RERANK_MODEL for repo in cache.repos)
+    return model in rerankers_installed()
 
 
 def pull_ollama_model(model: str, on_progress, should_stop=None) -> None:
@@ -166,8 +323,8 @@ def pull_ollama_model(model: str, on_progress, should_stop=None) -> None:
             on_progress(fraction, status)
 
 
-def pull_reranker(on_progress) -> None:
-    """Download RERANK_MODEL from HuggingFace Hub and load it.
+def pull_reranker(model: str = RERANK_MODEL, on_progress=None) -> None:
+    """Download a reranker model from HuggingFace Hub and load it.
 
     No byte-level progress here -- ``sentence_transformers.CrossEncoder``
     doesn't expose a hook into the underlying HF download, so this only ever
@@ -175,6 +332,8 @@ def pull_reranker(on_progress) -> None:
     singleton it populates (``rerank._model``) is what real reranking calls
     reuse afterward.
     """
-    on_progress(None, f"downloading {RERANK_MODEL}")
-    rerank.ensure_loaded()
-    on_progress(1.0, "downloaded")
+    if on_progress:
+        on_progress(None, f"downloading {model}")
+    rerank.ensure_loaded(model)
+    if on_progress:
+        on_progress(1.0, "downloaded")

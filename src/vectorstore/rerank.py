@@ -105,14 +105,20 @@ def _get_model():
     return _model
 
 
-def ensure_loaded() -> None:
+def ensure_loaded(model: str | None = None) -> None:
     """Force the cross-encoder to load (and download from HF if missing) now.
 
     Exists for the Settings view's download button -- calling this once from
     a background job means the first real query never pays the download, and
-    the loaded singleton is what ``rerank`` then reuses.
+    the loaded singleton is what ``rerank`` then reuses when the active model matches.
     """
-    _get_model()
+    target = model or RERANK_MODEL
+    if target == RERANK_MODEL:
+        _get_model()
+    else:
+        from sentence_transformers import CrossEncoder
+
+        CrossEncoder(target, max_length=MAX_LENGTH, device=DEVICE)
 
 
 def _squash(logit: float) -> float:

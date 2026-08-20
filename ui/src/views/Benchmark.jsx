@@ -1,8 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import Card from "../components/Card.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
-import { startBenchmark, benchmarkHistory, benchmarkModels, cancelJob, pollJob } from "../api.js";
+import {
+  startBenchmark,
+  benchmarkHistory,
+  benchmarkModels,
+  activeBenchmark,
+  cancelJob,
+  pollJob,
+} from "../api.js";
 
 export default function Benchmark() {
   const [workers, setWorkers] = useState(4);
@@ -16,7 +23,17 @@ export default function Benchmark() {
   const [history, setHistory] = useState([]);
   const [error, setError] = useState(null);
   const [stopping, setStopping] = useState(false);
+  const [expandedIds, setExpandedIds] = useState(new Set());
   const cancelledRef = useRef(false);
+
+  function toggleExpand(id) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const running = job && (job.status === "running" || job.status === "pending");
 
@@ -29,23 +46,44 @@ export default function Benchmark() {
   }
 
   useEffect(() => {
+    cancelledRef.current = false;
+    let ignore = false;
+
     loadHistory();
     benchmarkModels()
       .then(({ models: available }) => {
+        if (ignore) return;
         setModels(available);
         setModelsLoaded(true);
         // No server default -- auto-pick the first installed model so a run
         // still needs one explicit click, not a manual selection every time.
-        setModel(available[0] || "");
+        setModel((prev) => prev || available[0] || "");
       })
       .catch(() => {
         // No API yet -- the picker stays empty.
       });
-  }, []);
 
-  // Stop polling if the view unmounts -- the run itself keeps going server-side.
-  useEffect(() => () => {
-    cancelledRef.current = true;
+    activeBenchmark()
+      .then((runningJob) => {
+        if (ignore || !runningJob) return;
+        setJob(runningJob);
+        return pollJob(runningJob.id, {
+          onUpdate: (updated) => {
+            if (!cancelledRef.current) setJob(updated);
+          },
+          isCancelled: () => cancelledRef.current,
+        }).then((finalJob) => {
+          if (!cancelledRef.current) loadHistory();
+        });
+      })
+      .catch(() => {
+        // No active benchmark
+      });
+
+    return () => {
+      ignore = true;
+      cancelledRef.current = true;
+    };
   }, []);
 
   async function onStart() {
@@ -109,10 +147,10 @@ export default function Benchmark() {
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1 text-sm"
+              className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-sm dark:[color-scheme:dark]"
             >
               {models.map((m) => (
-                <option key={m} value={m}>
+                <option key={m} value={m} className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100">
                   {m}
                 </option>
               ))}
@@ -125,7 +163,7 @@ export default function Benchmark() {
               max={32}
               value={workers}
               onChange={(e) => setWorkers(e.target.value)}
-              className="w-20 rounded-md border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1 text-sm"
+              className="w-20 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-sm"
             />
           </Field>
           <Field label="Sample per suite">
@@ -135,7 +173,7 @@ export default function Benchmark() {
               placeholder="all"
               value={sample}
               onChange={(e) => setSample(e.target.value)}
-              className="w-24 rounded-md border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1 text-sm"
+              className="w-24 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-sm"
             />
           </Field>
           <Field label="Chunk size">
@@ -145,7 +183,7 @@ export default function Benchmark() {
               max={200}
               value={chunkSize}
               onChange={(e) => setChunkSize(e.target.value)}
-              className="w-20 rounded-md border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1 text-sm"
+              className="w-20 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-sm"
             />
           </Field>
           <label className="flex items-center gap-2 text-sm pb-1.5">
@@ -185,9 +223,12 @@ export default function Benchmark() {
 
       {job && (
         <Card title="Current run">
-          <div className="flex items-center gap-3 mb-3">
-            <StatusBadge status={job.status} />
-            <span className="text-xs text-neutral-500">{job.message}</span>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-3">
+              <StatusBadge status={job.status} />
+              <span className="text-xs text-neutral-500">{job.message}</span>
+            </div>
+            <RunParams params={job.params} />
           </div>
           {running && <ProgressBar value={job.progress} />}
           {/* Rendered at every status, not just "done": the job publishes
@@ -205,21 +246,163 @@ export default function Benchmark() {
         {history.length === 0 ? (
           <p className="text-sm text-neutral-500">No runs yet.</p>
         ) : (
-          <div className="flex flex-col gap-4">
-            {history.map((h) => (
-              <div key={h.id} className="border-t border-neutral-200 dark:border-neutral-800 pt-3 first:border-0 first:pt-0">
-                <div className="flex items-center gap-3 mb-2">
-                  <StatusBadge status={h.status} />
-                  <span className="text-xs text-neutral-500">
-                    {new Date(h.created_at * 1000).toLocaleString()}
-                  </span>
-                </div>
-                {h.result && <ResultsTable results={h.result} partial={h.status !== "done"} />}
-              </div>
-            ))}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-neutral-500 border-b border-neutral-200 dark:border-neutral-800">
+                  <th className="pb-2 pr-4 font-medium">Date & Time</th>
+                  <th className="pb-2 pr-4 font-medium">Model</th>
+                  <th className="pb-2 pr-4 font-medium">Status</th>
+                  <th className="pb-2 pr-4 font-medium">Configuration</th>
+                  <th className="pb-2 pr-4 font-medium">Results Summary</th>
+                  <th className="pb-2 text-right font-medium"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
+                {history.map((h) => {
+                  const isExpanded = expandedIds.has(h.id);
+                  return (
+                    <Fragment key={h.id}>
+                      <tr
+                        onClick={() => toggleExpand(h.id)}
+                        className="hover:bg-neutral-50 dark:hover:bg-neutral-900/60 cursor-pointer transition-colors"
+                      >
+                        <td className="py-2.5 pr-4 text-xs whitespace-nowrap text-neutral-500">
+                          {new Date(h.created_at * 1000).toLocaleString()}
+                        </td>
+                        <td className="py-2.5 pr-4 whitespace-nowrap">
+                          <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800">
+                            {h.params?.model || "default"}
+                          </span>
+                        </td>
+                        <td className="py-2.5 pr-4 whitespace-nowrap">
+                          <StatusBadge status={h.status} />
+                        </td>
+                        <td className="py-2.5 pr-4">
+                          <RunParams params={h.params} />
+                        </td>
+                        <td className="py-2.5 pr-4">
+                          {formatMetricsSummary(h.result) || (
+                            <span className="text-xs text-neutral-400 italic">
+                              {h.message || "—"}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 text-right whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpand(h.id);
+                            }}
+                            className="text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 underline"
+                          >
+                            {isExpanded ? "Hide details" : "View details"}
+                          </button>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="bg-neutral-50/50 dark:bg-neutral-900/30">
+                          <td colSpan={6} className="px-4 py-3">
+                            <div className="flex flex-col gap-2">
+                              {h.message && h.status !== "done" && (
+                                <div className="text-xs text-neutral-500 italic mb-1">
+                                  Status message: {h.message}
+                                </div>
+                              )}
+                              {h.result ? (
+                                <ResultsTable results={h.result} partial={h.status !== "done"} />
+                              ) : (
+                                <p className="text-xs text-neutral-400">No score data available.</p>
+                              )}
+                              {h.status === "failed" && h.error && (
+                                <pre className="mt-2 text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap">
+                                  {h.error}
+                                </pre>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+function formatMetricsSummary(result) {
+  if (!result || !Array.isArray(result) || result.length === 0) return null;
+  const suitesWithData = result.filter((r) => r.n > 0);
+  if (suitesWithData.length === 0) return <span className="text-xs text-neutral-400">0 questions answered</span>;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+      {suitesWithData.map((r) => {
+        const shortName = r.name
+          .replace("_passage_answer_questions.csv", "")
+          .replace("_answer_questions.csv", "")
+          .replace(".csv", "")
+          .replace(/_/g, " ");
+
+        const metricEntries = Object.entries(r).filter(([k]) => k !== "name" && k !== "n");
+
+        return (
+          <span key={r.name} className="inline-flex items-center gap-1">
+            <span className="font-medium text-neutral-700 dark:text-neutral-300 capitalize">{shortName}:</span>
+            <span className="text-neutral-500 dark:text-neutral-400">
+              {metricEntries
+                .map(([k, v]) => {
+                  const label = k
+                    .replace("@5", "")
+                    .replace("mean_answer_overlap", "overlap")
+                    .replace("pass_rate(overlap>=0.3)", "pass")
+                    .replace("correct_refusal_rate", "refusal");
+                  const val = typeof v === "number" ? (v <= 1 ? `${(v * 100).toFixed(0)}%` : v.toFixed(2)) : v;
+                  return `${label}: ${val}`;
+                })
+                .join(", ")}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function RunParams({ params }) {
+  if (!params) return null;
+  const { model, workers, sample, chunk_size, use_cache } = params;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+      {model && (
+        <span className="font-mono px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800 font-medium">
+          {model}
+        </span>
+      )}
+      {workers != null && (
+        <span className="px-2 py-0.5 rounded bg-neutral-100 text-neutral-600 border border-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:border-neutral-700">
+          {workers} {workers === 1 ? "worker" : "workers"}
+        </span>
+      )}
+      <span className="px-2 py-0.5 rounded bg-neutral-100 text-neutral-600 border border-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:border-neutral-700">
+        sample: {sample != null && sample !== "" ? sample : "all"}
+      </span>
+      {chunk_size != null && (
+        <span className="px-2 py-0.5 rounded bg-neutral-100 text-neutral-600 border border-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:border-neutral-700">
+          chunk: {chunk_size}
+        </span>
+      )}
+      {use_cache != null && (
+        <span className="px-2 py-0.5 rounded bg-neutral-100 text-neutral-600 border border-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:border-neutral-700">
+          {use_cache ? "cache" : "no-cache"}
+        </span>
+      )}
     </div>
   );
 }

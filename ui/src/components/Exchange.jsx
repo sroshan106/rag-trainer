@@ -127,10 +127,10 @@ export default function Exchange({
                   <select
                     value={rerunModel}
                     onChange={(e) => setRerunModel(e.target.value)}
-                    className="rounded border border-neutral-200 dark:border-neutral-800 bg-transparent px-1 py-0.5 text-[11px] dark:[color-scheme:dark]"
+                    className="rounded border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-1 py-0.5 text-[11px] dark:[color-scheme:dark]"
                   >
                     {models.map((m) => (
-                      <option key={m} value={m}>
+                      <option key={m} value={m} className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100">
                         {m}
                       </option>
                     ))}

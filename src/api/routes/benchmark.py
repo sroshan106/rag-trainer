@@ -83,10 +83,24 @@ def start_benchmark(body: BenchmarkRequest) -> dict:
             status_code=422,
             detail=f"unknown model {body.model!r} -- choose from {installed}",
         )
-    job = runner.submit("benchmark", _run_benchmark(body))
+    job_params = {
+        "model": body.model,
+        "workers": body.workers,
+        "sample": body.sample,
+        "chunk_size": body.chunk_size,
+        "use_cache": body.use_cache,
+    }
+    job = runner.submit("benchmark", _run_benchmark(body), params=job_params)
     return job.to_dict()
 
 
 @router.get("/history", response_model=list[JobResponse])
 def benchmark_history() -> list[dict]:
     return [j.to_dict() for j in runner.list() if j.kind == "benchmark"]
+
+
+@router.get("/active", response_model=JobResponse | None)
+def active_benchmark() -> dict | None:
+    """Lets the view re-attach to a benchmark run in progress after a page reload."""
+    job = runner.active("benchmark")
+    return job.to_dict() if job else None
