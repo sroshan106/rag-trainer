@@ -34,6 +34,7 @@ def test_query_passes_the_chosen_model_through(monkeypatch):
         return {"answer": "a", "sources": []}
 
     monkeypatch.setattr("src.api.routes.query.ask", fake_ask)
+    monkeypatch.setattr("src.api.routes.query.list_installed", lambda: ["qwen3:4b"])
 
     resp = client.post("/api/query", json={"query": "q", "model": "qwen3:4b"})
 
@@ -145,6 +146,7 @@ def test_stream_passes_the_chosen_model_through(monkeypatch):
         yield {"type": "done", "answer": "a", "sources": []}
 
     monkeypatch.setattr("src.api.routes.query.ask_stream", fake_ask_stream)
+    monkeypatch.setattr("src.api.routes.query.list_installed", lambda: ["qwen3:4b"])
 
     client.post("/api/query/stream", json={"query": "q", "model": "qwen3:4b"})
 

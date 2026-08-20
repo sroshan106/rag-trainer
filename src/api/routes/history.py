@@ -1,8 +1,4 @@
-"""Read access to the stored question/answer history.
-
-Writes happen in ``src.rag.graph.ask`` -- every query records itself, whether
-it came from this API or the CLI, so there is no "save" endpoint here.
-"""
+"""Read and delete access for stored question/answer history."""
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -32,8 +28,7 @@ def clear_history() -> dict:
 
 @router.delete("/{entry_id}", status_code=200)
 def delete_entry(entry_id: str) -> dict:
-    """Drop a single exchange, so pruning one bad answer doesn't mean
-    clearing the whole record."""
+    """Drop a single exchange from history."""
     deleted = history.delete(entry_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="no such history entry")

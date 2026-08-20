@@ -1,15 +1,6 @@
 """Hybrid retrieval: dense + lexical, combined with Reciprocal Rank Fusion.
-
-The two retrievers fail on opposite queries. Dense search handles paraphrase
-and never returns nothing; lexical search nails literal-phrase lookups and
-returns nothing at all when no query term appears in the corpus. Fusing them
-covers both, and -- because lexical misses are silent rather than low-scored --
-the combination also carries a refusal signal that a cosine cutoff had to
-approximate with a hand-tuned threshold.
-
-Scores are fused by rank, not by value: ts_rank_cd and cosine similarity are
-not on comparable scales, and normalising either one per query reintroduces
-exactly the corpus-specific tuning this is meant to remove.
+Fuses dense search (paraphrase) and lexical search (literal phrases) to cover both.
+Scores are fused by rank, not by value, since their scales are not comparable.
 """
 
 import os
@@ -18,9 +9,7 @@ from langchain_core.documents import Document
 
 from src.vectorstore import lexical
 
-# Standard RRF damping. Large relative to the list length, so the difference
-# between rank 1 and rank 2 stays modest and neither retriever can dominate on
-# the strength of a single confident hit.
+# Standard RRF damping to prevent either retriever from dominating.
 RRF_K = int(os.environ.get("RAG_RRF_K", "60"))
 
 DENSE_SCORE_KEY = "relevance_score"
@@ -69,10 +58,7 @@ def retrieve(
     for text, score in fused.items():
         merged[text].metadata[FUSION_SCORE_KEY] = score
 
-    # RRF ties are common on short lists -- two documents swapping ranks 1 and
-    # 2 between the retrievers score identically. Break on lexical score first:
-    # an exact-phrase match is the stronger evidence, and it is the case dense
-    # retrieval was already getting wrong.
+    # Break RRF ties on lexical score first (exact-phrase match is stronger evidence).
     ranked = sorted(
         merged.values(),
         key=lambda d: (

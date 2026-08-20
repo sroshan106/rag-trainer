@@ -1,13 +1,5 @@
 """Persistent record of asked questions, their answers, and their citations.
-
-Kept in the same Postgres instance as the vectors, but in its own table and
-its own module: this is a record of what the system was *asked*, not part of
-retrieval, and nothing in the query path reads it back.
-
-Writing history must never cost an answer. Every failure here is logged and
-swallowed -- a full disk or a dropped connection should degrade the audit
-trail, not turn a working query into an error.
-"""
+Writing history must never cost an answer, errors are swallowed."""
 
 import json
 import logging
@@ -29,9 +21,7 @@ _metadata = sa.MetaData()
 STATUS_PENDING = "pending"
 STATUS_DONE = "done"
 STATUS_ERROR = "error"
-# The client hung up (or hit Cancel) while the answer was still streaming.
-# Distinct from "error": nothing went wrong, the user just stopped caring,
-# and whatever tokens had already arrived are kept.
+# Client cancelled during streaming; partial answer is kept.
 STATUS_CANCELLED = "cancelled"
 
 query_history = sa.Table(
@@ -64,12 +54,7 @@ def history_enabled() -> bool:
 
 def _migrate(engine: sa.Engine) -> None:
     """Bring a table created before pending rows existed up to date.
-
-    ``create_all`` only creates missing tables, it never alters existing
-    ones -- deployments with a live ``query_history`` table need these
-    columns/constraints patched in place. Each statement is independently
-    safe to re-run.
-    """
+    Statements are independently safe to re-run."""
     statements = [
         "ALTER TABLE query_history ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'done'",
         "ALTER TABLE query_history ALTER COLUMN answer DROP NOT NULL",
@@ -95,12 +80,7 @@ def _engine(connection: str | None = None) -> sa.Engine:
 
 
 def start(query: str, model: str | None = None, connection: str | None = None) -> str | None:
-    """Insert a pending row before the graph runs. Returns its id, or None if not stored.
-
-    Inserted synchronously up front (rather than only at completion) so the
-    query is visible -- as pending -- to every tab/client polling history
-    while it's still running, not just after it finishes.
-    """
+    """Insert a pending row before the graph runs. Returns its id, or None if not stored."""
     if not history_enabled():
         return None
 
@@ -142,9 +122,7 @@ def complete(
                 .values(
                     answer=answer,
                     sources=list(sources),
-                    # Derived once at write time: an answer with no surviving
-                    # source is the refusal path, and recomputing that from the
-                    # answer text later would mean re-parsing prose.
+                    # Answer without sources implies refusal path.
                     refused=not sources,
                     latency_ms=latency_ms,
                     rerank_ms=rerank_ms,
@@ -215,12 +193,7 @@ def delete_all(connection: str | None = None) -> int:
 
 
 def cancel(entry_id: str, partial_answer: str = "", connection: str | None = None) -> None:
-    """Mark a pending row as cancelled, keeping whatever text had streamed.
-
-    The partial answer is stored rather than discarded: a half-finished answer
-    is often enough to see whether the query was going anywhere, and throwing
-    it away would leave the row indistinguishable from a failure.
-    """
+    """Mark a pending row as cancelled, keeping whatever text had streamed."""
     if entry_id is None:
         return
     try:

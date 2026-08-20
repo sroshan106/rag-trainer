@@ -1,51 +1,30 @@
-// Thin fetch wrappers over the FastAPI routes in src/api/routes/. Kept
-// framework-free (no axios/react-query) since the frontend dependency list
-// is meant to stay minimal -- four views don't need a data-fetching library.
-
 const BASE = "/api";
 
-// FastAPI puts the message in `detail`; anything else (a proxy error page,
-// a dropped connection) only has a status line to report.
 async function errorFrom(res) {
   let detail = res.statusText;
   try {
     const body = await res.json();
     detail = body.detail ?? detail;
-  } catch {
-    // response wasn't JSON -- fall back to statusText
-  }
+  } catch {}
   return new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
 }
 
-async function request(path, options) {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+async function request(path, options = {}) {
+  const isForm = options.body instanceof FormData;
+  const headers = isForm ? {} : { "Content-Type": "application/json" };
+  const res = await fetch(`${BASE}${path}`, { headers, ...options });
   if (!res.ok) throw await errorFrom(res);
-  if (res.status === 204) return null;
-  return res.json();
+  return res.status === 204 ? null : res.json();
 }
 
-export function runQuery(query, model = null) {
-  return request("/query", { method: "POST", body: JSON.stringify({ query, model }) });
-}
+const postJson = (path, data) => request(path, { method: "POST", body: JSON.stringify(data) });
+const postForm = (path, form) => request(path, { method: "POST", body: form });
+const del = (path) => request(path, { method: "DELETE" });
 
-export function queryModels() {
-  return request("/query/models");
-}
+export const runQuery = (query, model = null) => postJson("/query", { query, model });
+export const queryModels = () => request("/query/models");
+export const collectionStatus = () => request("/query/collection");
 
-export function collectionStatus() {
-  return request("/query/collection");
-}
-
-// Streaming counterpart to runQuery. Not an EventSource: that is GET-only, and
-// a question doesn't belong in a URL -- so the stream is a POST whose body is
-// read and parsed here. `signal` aborts the request, which the server sees as
-// a disconnect and records as a cancelled query.
-//
-// onEvent receives the decoded event objects in order: stage, token..., then
-// done or error. See src/rag/graph.py:ask_stream for their shape.
 export async function streamQuery(query, { model = null, signal, onEvent } = {}) {
   const res = await fetch(`${BASE}/query/stream`, {
     method: "POST",
@@ -63,8 +42,6 @@ export async function streamQuery(query, { model = null, signal, onEvent } = {})
     const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    // SSE frames are separated by a blank line. Line endings are CRLF from
-    // sse-starlette but LF from anything else in front of it, so both count.
     for (;;) {
       const match = /\r?\n\r?\n/.exec(buffer);
       if (!match) break;
@@ -72,129 +49,63 @@ export async function streamQuery(query, { model = null, signal, onEvent } = {})
       buffer = buffer.slice(match.index + match[0].length);
       const data = frame
         .split(/\r?\n/)
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trim())
+        .filter((l) => l.startsWith("data:"))
+        .map((l) => l.slice(5).trim())
         .join("\n");
       if (data) onEvent?.(JSON.parse(data));
     }
   }
 }
 
-export function ingestSplitters() {
-  return request("/ingest/splitters");
+export const ingestSplitters = () => request("/ingest/splitters");
+export const activeIngest = () => request("/ingest/active");
+export const ingestHistory = () => request("/ingest/history");
+export const deleteIngestedFile = (id) => del(`/ingest/files/${id}`);
+
+export function uploadAndIngest(file, splitter = null) {
+  const form = new FormData();
+  form.append("file", file);
+  if (splitter) form.append("splitter", splitter);
+  return postForm("/ingest/upload", form);
 }
 
-// Multipart, so no Content-Type header -- the browser must set the boundary.
-export async function uploadAndIngest(file, splitter = null) {
-  const body = new FormData();
-  body.append("file", file);
-  if (splitter) body.append("splitter", splitter);
-  const res = await fetch(`${BASE}/ingest/upload`, { method: "POST", body });
-  if (!res.ok) throw await errorFrom(res);
-  return res.json();
-}
-
-export function activeIngest() {
-  return request("/ingest/active");
-}
-
-export function ingestHistory() {
-  return request("/ingest/history");
-}
-
-export function deleteIngestedFile(id) {
-  return request(`/ingest/files/${id}`, { method: "DELETE" });
-}
-
-export function startBenchmark({
+export const startBenchmark = ({
   workers = 4,
   sample = null,
   use_cache = true,
   chunk_size = 10,
   model = null,
   test_files = null,
-} = {}) {
-  return request("/benchmark", {
-    method: "POST",
-    body: JSON.stringify({ workers, sample, use_cache, chunk_size, model, test_files }),
-  });
+} = {}) => postJson("/benchmark", { workers, sample, use_cache, chunk_size, model, test_files });
+
+export const benchmarkModels = () => request("/benchmark/models");
+export const getBenchmarkTestFiles = () => request("/benchmark/test-files");
+
+export function uploadBenchmarkTestFile(file) {
+  const form = new FormData();
+  form.append("file", file);
+  return postForm("/benchmark/test-files/upload", form);
 }
 
-export function benchmarkModels() {
-  return request("/benchmark/models");
-}
+export const deleteBenchmarkTestFile = (id) => del(`/benchmark/test-files/${id}`);
+export const benchmarkHistory = () => request("/benchmark/history");
+export const activeBenchmark = () => request("/benchmark/active");
 
-export function getBenchmarkTestFiles() {
-  return request("/benchmark/test-files");
-}
+export const queryHistory = (limit = 50) => request(`/history?limit=${limit}`);
+export const deleteHistoryEntry = (id) => del(`/history/${id}`);
+export const clearHistory = () => del("/history");
 
-export async function uploadBenchmarkTestFile(file) {
-  const body = new FormData();
-  body.append("file", file);
-  const res = await fetch(`${BASE}/benchmark/test-files/upload`, { method: "POST", body });
-  if (!res.ok) throw await errorFrom(res);
-  return res.json();
-}
+export const getJob = (id) => request(`/jobs/${id}`);
+export const cancelJob = (id) => postJson(`/jobs/${id}/cancel`, {});
 
-export function deleteBenchmarkTestFile(id) {
-  return request(`/benchmark/test-files/${id}`, { method: "DELETE" });
-}
-
-export function benchmarkHistory() {
-  return request("/benchmark/history");
-}
-
-export function activeBenchmark() {
-  return request("/benchmark/active");
-}
-
-export function queryHistory(limit = 50) {
-  return request(`/history?limit=${limit}`);
-}
-
-export function deleteHistoryEntry(id) {
-  return request(`/history/${id}`, { method: "DELETE" });
-}
-
-export function clearHistory() {
-  return request("/history", { method: "DELETE" });
-}
-
-export function getJob(id) {
-  return request(`/jobs/${id}`);
-}
-
-// Cooperative -- the job keeps reporting "running" until it unwinds, so the
-// caller should keep polling rather than assume this took effect immediately.
-export function cancelJob(id) {
-  return request(`/jobs/${id}/cancel`, { method: "POST" });
-}
-
-export function listModelCatalog() {
-  return request("/models");
-}
-
-export function pullModel(model) {
-  return request("/models/pull", { method: "POST", body: JSON.stringify({ model }) });
-}
-
-export function pullHistory() {
-  return request("/models/pull/history");
-}
-
-export function deleteModel(model) {
-  return request(`/models/${encodeURIComponent(model)}`, { method: "DELETE" });
-}
-
-export function getMetrics() {
-  return request("/metrics");
-}
+export const listModelCatalog = () => request("/models");
+export const pullModel = (model) => postJson("/models/pull", { model });
+export const pullHistory = () => request("/models/pull/history");
+export const deleteModel = (model) => del(`/models/${encodeURIComponent(model)}`);
+export const getMetrics = () => request("/metrics");
 
 const TERMINAL_STATUSES = ["done", "failed", "cancelled"];
 
-// Polls a job until it reaches a terminal state, calling onUpdate after
-// every poll. Returns the final job. Caller passes an AbortSignal-like
-// `cancelled` ref to stop early (e.g. component unmount).
 export async function pollJob(id, { onUpdate, intervalMs = 1000, isCancelled } = {}) {
   for (;;) {
     if (isCancelled?.()) return null;
@@ -205,6 +116,4 @@ export async function pollJob(id, { onUpdate, intervalMs = 1000, isCancelled } =
   }
 }
 
-export function metricsStreamUrl() {
-  return `${BASE}/metrics/stream`;
-}
+export const metricsStreamUrl = () => `${BASE}/metrics/stream`;

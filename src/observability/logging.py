@@ -1,10 +1,4 @@
-"""Structured JSON logging plus an in-process ring buffer for the Logs view.
-
-Mirrors the shape of ``tracing.py``: a stdlib logger with a JSON formatter so
-``docker compose logs`` stays greppable, and a bounded ``collections.deque``
-the UI can tail without a second write path to Postgres -- anything worth
-keeping past the buffer's window is already in ``traces``, not here.
-"""
+"""Structured JSON logging with an in-process ring buffer for the Logs view."""
 
 import collections
 import json
@@ -14,9 +8,6 @@ import sys
 import time
 
 LOGGER_NAME = "rag.app"
-
-# Bounded so the process can run indefinitely without the buffer growing --
-# the UI only ever needs the recent tail, not full history.
 RING_BUFFER_SIZE = int(os.environ.get("RAG_LOG_BUFFER_SIZE", "1000"))
 
 _ring: collections.deque = collections.deque(maxlen=RING_BUFFER_SIZE)
@@ -46,7 +37,7 @@ class RingBufferHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             formatted = json.loads(self.format(record))
-        except Exception:  # noqa: BLE001 - a bad log line must never crash logging
+        except Exception:  # noqa: BLE001
             return
         _ring.append(formatted)
 
@@ -70,18 +61,13 @@ def configure_logging(level: int = logging.INFO) -> None:
 
 
 def log(level: str, message: str, **fields) -> None:
-    """Convenience entry point: ``log("info", "ingest started", job_id=...)``."""
+    """Convenience entry point: log('info', 'message', key=val)."""
     configure_logging()
     logger.log(getattr(logging, level.upper(), logging.INFO), message, extra={"fields": fields})
 
 
 def tail(limit: int = 200, level: str | None = None, query: str | None = None) -> list[dict]:
-    """Most recent buffered log records, optionally filtered.
-
-    Filters match the level view (min-severity) and free-text search the
-    Logs view is required to have -- kept here rather than in the route so
-    the SSE stream and the plain GET can share the same logic.
-    """
+    """Most recent buffered log records, optionally filtered by level and query."""
     records = list(_ring)
     if level:
         min_no = getattr(logging, level.upper(), 0)

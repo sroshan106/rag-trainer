@@ -25,25 +25,20 @@ import {
 const BUSY_STATUSES = ["pending", "running"];
 
 function formatBytes(bytes) {
-  if (!bytes || bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+  if (!bytes) return "0 B";
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${["B", "KB", "MB", "GB"][i]}`;
 }
 
 function timeAgo(dateString) {
   if (!dateString) return "";
   const date = new Date(dateString);
   if (Number.isNaN(date.getTime())) return dateString;
-  const seconds = Math.floor((new Date() - date) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  const s = Math.floor((new Date() - date) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} hr ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
 
 export default function Ingest() {
@@ -70,16 +65,10 @@ export default function Ingest() {
         setSplitter(def);
       })
       .catch(() => {});
+    ingestHistory().then(setHistory).catch(() => {});
   }, []);
 
-  function refreshHistory() {
-    ingestHistory()
-      .then(setHistory)
-      .catch(() => {});
-  }
-
-  useEffect(refreshHistory, []);
-
+  const refreshHistory = () => ingestHistory().then(setHistory).catch(() => {});
   const busy = submitting || (job !== null && BUSY_STATUSES.includes(job.status));
 
   useEffect(() => {
@@ -101,11 +90,8 @@ export default function Ingest() {
     };
   }, []);
 
-  // Close menus when clicking outside
   useEffect(() => {
-    function handleClickOutside() {
-      setOpenMenuId(null);
-    }
+    const handleClickOutside = () => setOpenMenuId(null);
     window.addEventListener("click", handleClickOutside);
     return () => window.removeEventListener("click", handleClickOutside);
   }, []);
@@ -130,9 +116,7 @@ export default function Ingest() {
   }
 
   async function onDelete(entry) {
-    if (!window.confirm(`Delete ${entry.filename} and its vectors? This can't be undone.`)) {
-      return;
-    }
+    if (!window.confirm(`Delete ${entry.filename} and its vectors? This can't be undone.`)) return;
     setError(null);
     setDeletingId(entry.id);
     try {
@@ -157,9 +141,9 @@ export default function Ingest() {
     e.preventDefault();
     setIsDragging(false);
     if (busy) return;
-    const droppedFile = e.dataTransfer.files?.[0];
-    if (droppedFile && droppedFile.name.endsWith(".csv")) {
-      setFile(droppedFile);
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped?.name.endsWith(".csv")) {
+      setFile(dropped);
     } else {
       setError("Please drop a valid .csv file");
     }
@@ -171,17 +155,12 @@ export default function Ingest() {
     setTimeout(() => setCopiedSha(null), 1500);
   }
 
-  // Filtered documents
   const filteredHistory = history.filter((item) =>
     item.filename.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Compute aggregate stats
   const totalDocuments = history.reduce((acc, cur) => acc + (cur.documents || 0), 0);
-  const totalChunks = history.reduce(
-    (acc, cur) => acc + (cur.chunk_ids?.length || cur.documents || 0),
-    0
-  );
+  const totalChunks = history.reduce((acc, cur) => acc + (cur.chunk_ids?.length || cur.documents || 0), 0);
   const totalSizeBytes = history.reduce((acc, cur) => acc + (cur.size_bytes || 0), 0);
 
   return (

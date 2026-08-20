@@ -1,15 +1,4 @@
-"""One pooled SQLAlchemy engine per connection string, shared process-wide.
-
-History, file provenance, lexical search and the chunk count all live in the
-same database, and each used to keep its own engine cache -- four pools to one
-Postgres, and a count query that built and threw away a pool on every Ask page
-load. They share this one instead.
-
-``init`` exists because some callers need a one-off schema step (``create_all``,
-a migration) the first time a given URL is used. Sharing the engine must not
-mean sharing that step: it is tracked per (url, init), so whichever module
-happens to open the engine first doesn't rob the others of their setup.
-"""
+"""One pooled SQLAlchemy engine per connection string, shared process-wide."""
 
 import os
 import threading

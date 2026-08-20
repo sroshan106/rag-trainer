@@ -1,15 +1,20 @@
 # Architecture
 
-A local-only retrieval-augmented generation system. Nothing leaves the machine: Postgres
-(pgvector) stores the chunks and their embeddings, Ollama serves both the embedding model and
-the chat model, and a FastAPI service wires them together behind a React dashboard.
+A local-only retrieval-augmented generation system. Nothing leaves the machine: Postgres (pgvector) stores the chunks and their embeddings, Ollama serves both the embedding model and the chat model, and a FastAPI service wires them together behind a React dashboard.
 
-This document is the map. It explains what each layer owns, how a query and an ingest actually
-flow through the code, and where to put new code so it lands in the right place.
+## 1. Why it runs entirely locally
 
----
+Every component — the LLM, the embedding model, the vector database — runs in a container on this machine. No document text and no query ever leaves the host, there is no per-token cost, and the whole stack comes up with one `docker compose up`.
 
-## 1. The four layers
+The tradeoff is quality and speed: `llama3.2:3b` is a small model chosen to fit inside the 4GB of VRAM on a GTX 1050. Swapping to a hosted API later means changing one `ChatOllama(...)` construction.
+
+## 2. The Pieces
+
+- **Ollama:** Serves two models over HTTP: `llama3.2:3b` generates answers, and `nomic-embed-text` turns text into vectors. Uses GPU passthrough.
+- **Postgres + pgvector:** Stores document chunks alongside vectors and answers nearest-neighbour queries. Also holds a `tsvector` column + GIN index for lexical search.
+- **LangChain & LangGraph:** LangChain supplies the adapters (OllamaEmbeddings, PGVector, loaders). LangGraph orchestrates control flow as an explicit state graph (retrieve → grade → generate).
+
+## 3. The Four Layers
 
 ```mermaid
 flowchart TB
@@ -56,16 +61,11 @@ flowchart TB
     class PG,OLL store
 ```
 
-**The rule that keeps this honest: arrows only point downward.** `src/vectorstore` must never
-import `src/rag`; `src/rag` must never import `src/api`. If you need something from a layer
-above, the dependency is inverted — pass it in as an argument.
+**The rule that keeps this honest:** arrows only point downward.
 
----
+## 4. Answering a Query
 
-## 2. Answering a query
-
-`ask()` and `ask_stream()` in `src/rag/graph.py` are the two entrypoints. Both walk the same
-three nodes; the streaming one steps them by hand so it can emit stage boundaries and tokens.
+`ask()` and `ask_stream()` in `src/rag/graph.py` walk three nodes.
 
 ```mermaid
 flowchart TD
@@ -112,19 +112,10 @@ flowchart TD
     class ERR,REFUSE bad
 ```
 
-Two design decisions worth knowing before you change anything here:
+- **There is no retry edge:** Retrieval is deterministic; re-running the same query returns the same results.
+- **Citations are computed, not generated:** Small models don't reliably follow inline-citation rules, so `src/rag/citations.py` deterministically attributes sources from graded chunks.
 
-- **There is no retry edge.** Retrieval is deterministic and returns results sorted by
-  descending similarity, so re-running the same query can never surface a chunk that clears
-  the grader when the top results did not. A retry loop only becomes useful alongside query
-  rewriting.
-- **Citations are computed, not generated.** Small local models do not reliably follow
-  inline-citation instructions, so `src/rag/citations.py` derives sources deterministically
-  from the chunks that survived grading.
-
----
-
-## 3. Ingesting documents
+## 5. Ingesting Documents
 
 ```mermaid
 flowchart LR
@@ -146,26 +137,23 @@ flowchart LR
     class SKIP,REJECT bad
 ```
 
-**The invariant that matters most: the embedding model used at ingest must match the one used
-at query time.** A mismatch does not raise — it silently returns garbage neighbours. Treat the
-embedding model as baked into the index, not as a runtime setting.
+**Invariant:** The embedding model used at ingest must match the one used at query time. A mismatch silently returns garbage neighbours.
 
----
+## 6. UI Architecture and Metrics
 
-## 4. Configuration lifetimes
+The UI is built with React/Vite and talks to the FastAPI backend. It provides views for Ask, Ingest, Benchmark, System, etc.
 
-Not all configuration is the same kind of thing, and conflating the three is the most common
-source of confusion in this codebase.
+Since browsers don't expose host system metrics (CPU load, VRAM, GPU temps), these are collected server-side (`src/observability/sysmetrics.py`) using `psutil`, `pynvml`, and Docker APIs, and streamed via Server-Sent Events (SSE).
+
+### Configuration Lifetimes
 
 | Lifetime | Examples | Changing it means |
 |---|---|---|
-| **Baked into the index** | chunk size, chunk overlap, embedding model | Re-ingesting the entire corpus |
-| **Live per query** | `k`, relevance floor/ratio, chat model, citations on/off | Takes effect on the next query |
-| **Server-owned** | `DATABASE_URL`, `OLLAMA_BASE_URL` | Restart; never exposed to the browser |
+| **Baked into the index** | chunk size, overlap, embedding model | Re-ingesting the entire corpus |
+| **Live per query** | `k`, relevance cutoffs, chat model | Takes effect on the next query |
+| **Server-owned** | `DATABASE_URL`, `OLLAMA_BASE_URL` | Restart; never exposed to browser |
 
----
-
-## 5. Where new code goes
+## 7. Where New Code Goes
 
 | You are adding… | It belongs in |
 |---|---|
@@ -176,7 +164,3 @@ source of confusion in this codebase.
 | A new endpoint | A router in `src/api/routes/`, schemas in `src/api/schemas.py` |
 | Anything long-running | A job kind on `src/jobs/runner.py`, never inline in a route |
 | A new dashboard screen | `ui/src/views/`, wired into `ui/src/App.jsx` |
-
-A route function should read as HTTP mapping and nothing else: parse, call one domain function,
-translate errors to status codes. When a route body starts orchestrating storage, the logic has
-escaped its layer.

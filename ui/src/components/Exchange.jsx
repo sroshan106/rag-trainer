@@ -20,12 +20,10 @@ function formatWhen(iso) {
   if (!iso) return null;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  const seconds = Math.floor((new Date() - date) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  const s = Math.floor((new Date() - date) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return date.toLocaleDateString();
 }
 
@@ -66,23 +64,18 @@ export default function Exchange({
   const [copied, setCopied] = useState(false);
 
   const streaming = live && Boolean(entry.answer);
-  const pending = entry.status === "pending";
-  const failed = entry.status === "error";
-  const cancelled = entry.status === "cancelled";
+  const when = formatWhen(entry.created_at);
 
   async function onCopy() {
     try {
       await navigator.clipboard.writeText(entry.answer ?? "");
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard error fallback
-    }
+    } catch {}
   }
 
   return (
     <section className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-5 shadow-sm transition-all duration-200">
-      {/* Header: Question + Model & Time */}
       <div className="flex items-start justify-between gap-4 pb-3 border-b border-slate-800/70">
         <div className="flex items-start gap-2.5 min-w-0">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-950/70 text-blue-400 border border-blue-800/40 mt-0.5">
@@ -105,44 +98,38 @@ export default function Exchange({
               {entry.model}
             </span>
           )}
-          {formatWhen(entry.created_at) && (
-            <span className="text-[11px] text-slate-400">{formatWhen(entry.created_at)}</span>
-          )}
+          {when && <span className="text-[11px] text-slate-400">{when}</span>}
         </div>
       </div>
 
-      {/* Live Pipeline Stepper */}
       {live && (
         <div className="mt-3.5">
           <StageIndicator stage={stage} detail={stageDetail} streaming={streaming} />
         </div>
       )}
 
-      {pending && !live && (
+      {entry.status === "pending" && !live && (
         <div className="mt-3 flex items-center gap-2 p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 animate-pulse">
           <Sparkles className="h-4 w-4 text-blue-400" />
           <span>Processing query in background...</span>
         </div>
       )}
 
-      {/* Answer Content with Markdown support */}
       {entry.answer && (
         <div className="mt-3.5 text-sm text-slate-200 leading-relaxed prose prose-invert max-w-none prose-p:my-2 prose-pre:bg-slate-950 prose-pre:border prose-pre:border-slate-800 prose-code:text-blue-300 prose-code:bg-slate-900 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.answer}</ReactMarkdown>
-          {streaming && (
-            <span className="inline-block h-4 w-1.5 ml-1 bg-blue-500 animate-pulse align-middle" />
-          )}
+          {streaming && <span className="inline-block h-4 w-1.5 ml-1 bg-blue-500 animate-pulse align-middle" />}
         </div>
       )}
 
-      {failed && (
+      {entry.status === "error" && (
         <div className="mt-3 flex items-center gap-2 p-3 rounded-xl bg-rose-950/40 border border-rose-900/60 text-xs text-rose-300">
           <XCircle className="h-4 w-4 text-rose-400 shrink-0" />
           <span>This query encountered an error before producing an answer.</span>
         </div>
       )}
 
-      {cancelled && (
+      {entry.status === "cancelled" && (
         <div className="mt-3 flex items-center gap-2 p-3 rounded-xl bg-amber-950/40 border border-amber-900/60 text-xs text-amber-300">
           <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
           <span>Cancelled{entry.answer ? " mid-answer." : " before generation."}</span>
@@ -156,10 +143,8 @@ export default function Exchange({
         </div>
       )}
 
-      {/* Sources list */}
       <SourceList sources={entry.sources} />
 
-      {/* Footer toolbar: Latency stats & Actions */}
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800/80 pt-3 text-xs">
         <Timing entry={entry} />
 

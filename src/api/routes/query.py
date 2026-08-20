@@ -1,11 +1,5 @@
 """The Ask view's backing route: one query in, one grounded answer out.
-
-Delegates entirely to ``src.rag.graph.ask`` -- no retrieval or generation
-logic lives here. Defined as a sync function deliberately: FastAPI runs sync
-path operations in a worker thread, which is what keeps ``ask``'s blocking
-Postgres/Ollama calls off the event loop without this route needing to know
-anything about threading.
-"""
+Delegates entirely to ``src.rag.graph.ask``."""
 
 import asyncio
 import json

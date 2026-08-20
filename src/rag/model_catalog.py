@@ -1,28 +1,6 @@
 """Which models this app can use, and what's actually on disk right now.
 
-Split from ``src.rag.nodes``/``src.vectorstore.rerank`` deliberately: those
-modules own *how* a model is called, this one owns *whether it exists yet* --
-the Settings view's download buttons and the Ask/Benchmark pickers both need
-"is X on disk" without importing the generation or reranking path.
-
-Three kinds of model live here, all optional to have pulled at any given
-moment (nothing is force-downloaded at startup or import time anymore -- see
-docker-compose.yml, which used to run a blocking ``ollama pull`` before the
-app would even start):
-
-- Chat models (``CATALOG``, via Ollama): interchangeable, selectable per
-  query/benchmark run.
-- The embedding model (``EMBED_MODELS``, via Ollama): NOT interchangeable --
-  every ingested chunk was vectorized with it, and swapping it silently would
-  make retrieval compare vectors from two different spaces. Kept out of
-  ``CATALOG`` so it can never be offered as a chat-model choice, but it is
-  just as optional to download from Settings as everything else here --
-  ingestion/query simply degrade to a clear error if it's missing, they don't
-  block anything at import time.
-- The reranker (``RERANK_MODEL``, via HuggingFace Hub, not Ollama): already
-  optional at runtime through ``RAG_RERANK=false``; this module adds a way to
-  pre-download it from Settings instead of paying for it lazily on the first
-  query that reranks.
+Model presence checking and download management for chat, embedding, and reranker models. Chat/embed via Ollama, reranker via HuggingFace Hub.
 """
 
 import json
@@ -37,13 +15,9 @@ from src.vectorstore.store import EMBED_MODEL
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
-# Chat models the UI is allowed to offer as *choices* for download and
-# selection. Deliberately the same list nodes.py already validates queries
-# against -- a model pulled outside this set would be selectable nowhere, so
-# there is no reason to let the pull endpoint accept an arbitrary name.
+# Chat models the UI is allowed to offer as choices for download and selection.
 CATALOG = AVAILABLE_MODELS
 
-# Embedding models compatible with 4GB VRAM GPU. Exposed in Settings for download.
 _DEFAULT_EMBED_MODELS = (
     "nomic-embed-text",
     "all-minilm",
@@ -52,15 +26,13 @@ _DEFAULT_EMBED_MODELS = (
     "mxbai-embed-large",
     "snowflake-arctic-embed",
 )
-EMBED_MODELS = (
-    _DEFAULT_EMBED_MODELS
-    if EMBED_MODEL in _DEFAULT_EMBED_MODELS
-    else (EMBED_MODEL, *_DEFAULT_EMBED_MODELS)
-)
+def _ensure_in_tuple(item: str, defaults: tuple[str, ...]) -> tuple[str, ...]:
+    return defaults if item in defaults else (item, *defaults)
+
+EMBED_MODELS = _ensure_in_tuple(EMBED_MODEL, _DEFAULT_EMBED_MODELS)
 
 RERANK_MODEL = rerank.RERANK_MODEL
 
-# Reranker models exposed in Settings for download and local caching.
 _DEFAULT_RERANK_MODELS = (
     "cross-encoder/ms-marco-MiniLM-L-6-v2",
     "cross-encoder/ms-marco-MiniLM-L-12-v2",
@@ -69,11 +41,7 @@ _DEFAULT_RERANK_MODELS = (
     "mixedbread-ai/mxbai-rerank-base-v1",
     "jinaai/jina-reranker-v2-base-multilingual",
 )
-RERANK_CATALOG = (
-    _DEFAULT_RERANK_MODELS
-    if RERANK_MODEL in _DEFAULT_RERANK_MODELS
-    else (RERANK_MODEL, *_DEFAULT_RERANK_MODELS)
-)
+RERANK_CATALOG = _ensure_in_tuple(RERANK_MODEL, _DEFAULT_RERANK_MODELS)
 
 # Minimum hardware requirements, sizes, and architectural metadata for models.
 MODEL_METADATA = {
@@ -210,9 +178,7 @@ MODEL_METADATA = {
 
 _OLLAMA_PULLABLE = (*CATALOG, *EMBED_MODELS)
 
-# Ollama emits a progress line every few hundred milliseconds while a pull is
-# alive, so this is generous for a healthy download and still bounds how long
-# a wedged one can sit there.
+# Timeout for reading progress lines from Ollama.
 PULL_READ_TIMEOUT_SECONDS = 60.0
 
 
@@ -221,18 +187,13 @@ def _installed_names() -> set[str]:
         resp = httpx.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5.0)
         resp.raise_for_status()
     except httpx.HTTPError:
-        # Ollama unreachable -- treat as "nothing installed" rather than
-        # raising, so callers degrade to an empty list instead of failing.
+        # Ollama unreachable -- treat as "nothing installed".
         return set()
     return {m["name"] for m in resp.json().get("models", [])}
 
 
 def _is_installed(model: str, names: set[str]) -> bool:
-    # Ollama always tags a pulled model (implicitly ":latest" if the pull
-    # didn't name one); a catalog entry that omits the tag -- like
-    # EMBED_MODEL's bare "nomic-embed-text" -- would never match the literal
-    # "nomic-embed-text:latest" Ollama reports, so fall back to comparing the
-    # name without its tag when the catalog entry doesn't specify one.
+    # Fall back to comparing name without tag if catalog entry doesn't specify one.
     if model in names:
         return True
     if ":" not in model:
@@ -241,11 +202,7 @@ def _is_installed(model: str, names: set[str]) -> bool:
 
 
 def list_installed() -> list[str]:
-    """Catalog chat models actually present in the Ollama instance right now.
-
-    A catalog entry that hasn't been pulled (or is still pulling) must not
-    show up as selectable in Ask/Benchmark -- picking it would 404 mid-query.
-    """
+    """Catalog chat models actually present in the Ollama instance right now."""
     names = _installed_names()
     return [m for m in CATALOG if _is_installed(m, names)]
 
@@ -273,28 +230,13 @@ def rerankers_installed() -> list[str]:
 
 
 def reranker_installed(model: str = RERANK_MODEL) -> bool:
-    """Whether a specific reranker model is in the local HuggingFace cache.
-
-    Scans the cache rather than instantiating ``CrossEncoder`` -- loading the
-    model just to check whether loading it would download something is the
-    exact cost this status check exists to avoid paying on every page load.
-    """
+    """Whether a specific reranker model is in the local HuggingFace cache."""
     return model in rerankers_installed()
 
 
 def pull_ollama_model(model: str, on_progress, should_stop=None) -> None:
     """Stream a model pull from Ollama, reporting progress as it downloads.
-
-    Ollama's ``/api/pull`` returns newline-delimited JSON, one status object
-    per line -- ``{"status": "pulling ...", "completed": N, "total": M}``
-    once the manifest resolves, plain status strings before and after. Bytes,
-    not layers, are what ``on_progress`` gets: a model is usually one large
-    layer, so byte progress is the only granularity worth showing.
-
-    Stopping is cooperative, like the benchmark run: ``should_stop`` is polled
-    between streamed lines, so a cancel lands within one progress line, and
-    leaving the ``stream`` block is what actually aborts the download.
-    """
+    Stopping is cooperative; should_stop is polled between streamed lines."""
     if model not in _OLLAMA_PULLABLE:
         raise ValueError(f"{model!r} is not downloadable here: {list(_OLLAMA_PULLABLE)}")
 
@@ -324,14 +266,7 @@ def pull_ollama_model(model: str, on_progress, should_stop=None) -> None:
 
 
 def pull_reranker(model: str = RERANK_MODEL, on_progress=None) -> None:
-    """Download a reranker model from HuggingFace Hub and load it.
-
-    No byte-level progress here -- ``sentence_transformers.CrossEncoder``
-    doesn't expose a hook into the underlying HF download, so this only ever
-    reports the two ends of the job. The load is not wasted work: the
-    singleton it populates (``rerank._model``) is what real reranking calls
-    reuse afterward.
-    """
+    """Download a reranker model from HuggingFace Hub and load it."""
     if on_progress:
         on_progress(None, f"downloading {model}")
     rerank.ensure_loaded(model)
@@ -369,10 +304,7 @@ def delete_reranker(model: str = RERANK_MODEL) -> None:
 
 def delete_model(model: str) -> None:
     """Delete an Ollama or HuggingFace reranker model from local disk."""
-    is_reranker = (
-        model in RERANK_CATALOG
-        or model == RERANK_MODEL
-    )
+    is_reranker = model in RERANK_CATALOG or model == RERANK_MODEL
     if is_reranker:
         delete_reranker(model)
     else:

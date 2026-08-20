@@ -1,9 +1,4 @@
-"""The System view's backing route: one-shot metrics plus a 1Hz SSE stream.
-
-SSE rather than WebSocket because the flow is strictly server-to-client
-(ui_plan.md, "Transport") -- it reconnects automatically and needs no extra
-protocol handling for a stream that never receives client messages.
-"""
+"""The System view's backing route: one-shot metrics plus a 1Hz SSE stream."""
 
 import asyncio
 import json
@@ -28,8 +23,6 @@ async def frame_generator(request: Request):
     while True:
         if await request.is_disconnected():
             break
-        # collect_all() does blocking syscalls (psutil, NVML); off the
-        # event loop so one slow sample can't stall other requests.
         frame = await asyncio.to_thread(collect_all)
         yield {"event": "metrics", "data": json.dumps(frame)}
         await asyncio.sleep(STREAM_INTERVAL_SECONDS)

@@ -56,15 +56,7 @@ RERANK_MODEL = os.environ.get(
 
 RERANK_SCORE_KEY = "rerank_score"
 
-# CPU keeps the card free; see the module docstring for the latency this costs.
 DEVICE = os.environ.get("RAG_RERANK_DEVICE", "cpu")
-
-# Truncation bound for the pair encoder, and the dominant cost knob -- latency
-# is linear in it. Chunks run ~1000 tokens against a 512-token budget shared by
-# query and document, so the tail of a chunk already goes unscored at the
-# default. Reranking is a ranking decision rather than a reading one, and a
-# chunk's opening carries its topic; this is also the strongest argument for
-# splitting retrieval onto smaller chunks than generation reads.
 MAX_LENGTH = int(os.environ.get("RAG_RERANK_MAX_LENGTH", "512"))
 
 _model = None
@@ -80,12 +72,7 @@ def rerank_enabled() -> bool:
 
 
 def _get_model():
-    """Load the cross-encoder once, pinned to CPU.
-
-    Imported lazily so that importing this module -- which the graph does on
-    every run -- costs nothing when reranking is switched off, and so the
-    torch dependency is only required by the path that actually uses it.
-    """
+    """Load the cross-encoder lazily, pinned to device."""
     global _model
     if _model is None:
         with _init_lock:
@@ -94,9 +81,6 @@ def _get_model():
                 from sentence_transformers import CrossEncoder
 
                 if DEVICE == "cpu":
-                    # Torch defaults to half the visible cores. Nothing else
-                    # runs on CPU during a query -- generation is on the card --
-                    # so the reranker may as well have all of them.
                     torch.set_num_threads(os.cpu_count() or 1)
 
                 _model = CrossEncoder(
@@ -106,12 +90,7 @@ def _get_model():
 
 
 def ensure_loaded(model: str | None = None) -> None:
-    """Force the cross-encoder to load (and download from HF if missing) now.
-
-    Exists for the Settings view's download button -- calling this once from
-    a background job means the first real query never pays the download, and
-    the loaded singleton is what ``rerank`` then reuses when the active model matches.
-    """
+    """Force the cross-encoder to load immediately."""
     target = model or RERANK_MODEL
     if target == RERANK_MODEL:
         _get_model()
@@ -126,12 +105,7 @@ def _squash(logit: float) -> float:
 
 
 def rerank(query: str, docs: list[Document], k: int) -> list[Document]:
-    """Return the k documents the cross-encoder ranks highest for ``query``.
-
-    Every input document is stamped with ``rerank_score`` before truncation, so
-    a trace shows what the discarded candidates scored and not just which ones
-    survived.
-    """
+    """Return the top k documents ranked by the cross-encoder."""
     if not docs:
         return []
 

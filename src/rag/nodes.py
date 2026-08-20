@@ -14,13 +14,7 @@ from src.vectorstore.store import load_vectorstore
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
-# Every chat model this card can run, sized to fit 4GB VRAM alongside the
-# reranker (~3.0GB budget -- see rerank.py). No entry here is "the default":
-# a query must name one explicitly, and the API layer only accepts a name
-# that's both in this tuple and actually pulled (src.rag.model_catalog) --
-# there is deliberately no fallback that lets an un-downloaded model answer.
-# Keep in sync with what's actually offered for download
-# (src.rag.model_catalog.CATALOG mirrors this).
+# Chat models sized for 4GB VRAM. Must be in sync with model_catalog.CATALOG.
 AVAILABLE_MODELS = (
     "llama3.2:3b",
     "llama3.2:1b",
@@ -32,41 +26,22 @@ AVAILABLE_MODELS = (
 
 RETRIEVE_K = 5
 
-# How many candidates retrieval hands the reranker. The cross-encoder can only
-# reorder what it is given, so the top-k the grader sees is capped by what came
-# back here -- a chunk that lands at rank 7 in the fused list is unrecoverable
-# at RETRIEVE_K=5 no matter how well it would have scored. Widening the fetch
-# is what makes reranking able to pay for itself; it costs one larger SQL
-# result and 20 cross-encoder pairs, not 20 LLM calls.
+# Retrieval candidate count for reranking; wider fetch lets the reranker find better results.
 FETCH_K = int(os.environ.get("RAG_FETCH_K", "20"))
 
-# Ollama defaults num_ctx to 4096. Benchmark prompts on this corpus measure
-# ~3.5k tokens, which leaves no margin -- and an overflow is silent, truncating
-# from the front of the prompt, which is exactly where the highest-ranked
-# context sits. Set explicitly so the failure would be visible instead.
+# Explicit context window; Ollama's 4096 default is too small for RAG prompts.
 NUM_CTX = int(os.environ.get("RAG_NUM_CTX", "8192"))
 
-# qwen3:4b does not fit this 4GB card at NUM_CTX=8192 -- Ollama spills part of
-# it to CPU, and CPU prefill on a multi-thousand-token RAG prompt measured
-# 400s+ for a single query. Measured empirically (`ollama ps` CPU/GPU split
-# while stepping num_ctx down): 3072 is the largest context that still loads
-# 100% GPU (3.0GB) on this card; 4096 already spills 6% to CPU. This trades
-# away some of the truncation margin NUM_CTX was set to buy back -- a long
-# RAG prompt can still overflow 3072 and lose its earliest (highest-ranked)
-# context -- but a slow-and-correct prompt is moot if the query times out
-# first.
+# qwen3:4b at 8192 ctx spills to CPU (400s+ per query). 3072 is the largest that fits fully on a 4GB card.
 QWEN3_NUM_CTX = int(os.environ.get("RAG_NUM_CTX_QWEN3", "3072"))
 
 
 def _num_ctx_for(model: str) -> int:
     return QWEN3_NUM_CTX if model.startswith("qwen3") else NUM_CTX
 
-# Absolute floor: a chunk this dissimilar is noise no matter what else came
-# back — this is what lets an off-topic query refuse instead of citing the
-# five least-bad chunks in the collection.
+# Floor below which any chunk is noise, enabling off-topic refusal.
 RELEVANCE_FLOOR = float(os.environ.get("RAG_RELEVANCE_FLOOR", "0.56"))
-# Relative cutoff: drop chunks far weaker than the best hit, so a query with
-# one strong match doesn't drag along filler that happens to clear the floor.
+# Relative cutoff: drop chunks far weaker than the best hit.
 RELEVANCE_RATIO = float(os.environ.get("RAG_RELEVANCE_RATIO", "0.9"))
 
 SCORE_KEY = hybrid.DENSE_SCORE_KEY
@@ -171,11 +146,6 @@ def grade_node(state: dict) -> dict:
         tracing.detail(kept=0, dropped=len(state["retrieved_docs"]), cutoff=None)
         return {"graded_docs": []}
 
-    # A full-text hit is kept unconditionally. Postgres only returns rows whose
-    # tsvector actually matches the query, so a lexical hit is direct evidence
-    # that the chunk contains the query's terms — and an off-topic query gets an
-    # empty lexical list rather than a weak one, which is what preserves the
-    # refusal path without adding a second threshold to tune.
     lexical = [d for d in docs if LEXICAL_KEY in d.metadata]
     dense_only = [d for d in docs if LEXICAL_KEY not in d.metadata]
     dense_scores = [
@@ -192,21 +162,14 @@ def grade_node(state: dict) -> dict:
             d for d in dense_only if (d.metadata.get(SCORE_KEY) or 0.0) >= cutoff
         ]
 
-    # Rebuild in fused-rank order rather than concatenating the two groups.
     keep = {id(d) for d in lexical} | {id(d) for d in graded_dense}
     graded = [d for d in docs if id(d) in keep]
+    
+    bound = None if not dense_scores else ("floor" if RELEVANCE_FLOOR >= max(dense_scores) * RELEVANCE_RATIO else "ratio")
 
     tracing.detail(
         cutoff=None if cutoff is None else round(cutoff, 4),
-        # Which bound decided the dense cutoff — the absolute floor or the ratio
-        # against the best hit. The distinction explains most refusals.
-        bound=None
-        if not dense_scores
-        else (
-            "floor"
-            if RELEVANCE_FLOOR >= max(dense_scores) * RELEVANCE_RATIO
-            else "ratio"
-        ),
+        bound=bound,
         kept_lexical=len(lexical),
         kept_dense=len(graded_dense),
         kept=len(graded),
@@ -215,14 +178,8 @@ def grade_node(state: dict) -> dict:
     return {"graded_docs": graded}
 
 
-# qwen3's Ollama template always primes the assistant turn with a literal
-# `<think>`, regardless of the `reasoning`/`think` request flag -- this
-# server's template has no branch that skips it (see docker-compose.yml's
-# ollama image pin). "/no_think" is Qwen3's own soft switch: appended to the
-# user turn, it makes the model close the thinking block immediately instead
-# of spending tokens on it -- a real latency win, not just a display fix.
-# Model-specific rather than a generic ChatOllama kwarg because it's a
-# convention this model family reads out of the prompt text itself.
+# "/no_think" is Qwen3's soft switch to immediately close the think block.
+# Model-specific since it is read out of the prompt text itself.
 _NO_THINK_SUFFIX = " /no_think"
 _THINKING_MODEL_PREFIXES = ("qwen3",)
 
@@ -231,9 +188,7 @@ def _wants_no_think(model: str) -> bool:
     return model.startswith(_THINKING_MODEL_PREFIXES)
 
 
-# Belt-and-suspenders: /no_think usually means the response has no <think>
-# block at all, but stripping one if it's there keeps the answer clean even
-# if a future model ignores the suffix.
+# Strip a <think> block if present to keep the answer clean.
 _THINK_CLOSE = "</think>"
 
 
@@ -247,13 +202,7 @@ REFUSAL_ANSWER = "I don't have enough context to answer that question."
 
 
 class _ThinkFilter:
-    """Drop a leading ``<think>`` block from a stream, token by token.
-
-    ``_strip_thinking`` can only run on a finished answer. Streaming needs the
-    same rule applied incrementally: hold text back while it still might be the
-    opening of a think block, and release everything after the close tag. A
-    model that never opens one pays only the first token of delay.
-    """
+    """Drop a leading ``<think>`` block from a stream, token by token."""
 
     _OPEN = "<think>"
 
@@ -262,7 +211,6 @@ class _ThinkFilter:
         self._passthrough = False
 
     def feed(self, chunk: str) -> str:
-        """Return the part of ``chunk`` that is safe to show now."""
         if self._passthrough:
             return chunk
         self._buffer += chunk
@@ -270,7 +218,6 @@ class _ThinkFilter:
         if _THINK_CLOSE in text:
             self._passthrough = True
             return text.split(_THINK_CLOSE, 1)[1].lstrip()
-        # Still ambiguous while the text so far is a prefix of "<think>".
         if text.startswith(self._OPEN) or self._OPEN.startswith(text):
             return ""
         self._passthrough = True
@@ -284,8 +231,6 @@ def _refusal() -> dict:
 
 def _prompt_for(state: dict) -> tuple[str, str]:
     """Build the generation prompt. Returns ``(model, prompt)``."""
-    # No fallback: graph.py rejects an unresolved model before a node ever
-    # runs, so state["model"] is always a validated, installed model by now.
     model = state["model"]
     context = format_context(state["graded_docs"])
     prompt = RAG_PROMPT.format(context=context, question=state["query"])
@@ -315,15 +260,8 @@ def generate_node(state: dict) -> dict:
 
 def generate_stream(state: dict):
     """Yield answer text as it arrives; return generate_node's dict at the end.
-
-    Written alongside ``generate_node`` rather than wrapping it: only the
-    streaming path can surface a partial answer, and the CLI and benchmark
-    callers have no use for a token-by-token path they would only re-join.
-    Consume it with ``result = yield from generate_stream(state)``.
-
-    Closing the generator early (the client hung up, or hit Cancel) propagates
-    GeneratorExit into ``llm.stream``, which is what actually stops Ollama
-    generating instead of letting an abandoned query run to completion.
+    
+    Closing early propagates GeneratorExit to stop Ollama.
     """
     with tracing.span("generate"):
         if not state["graded_docs"]:
@@ -338,9 +276,7 @@ def generate_stream(state: dict):
         for chunk in _get_llm(model).stream(prompt):
             last = chunk
             visible = think.feed(chunk.content)
-            # Whatever follows a think block starts with the newlines that
-            # closed it; leading blank space in a streamed answer is visible
-            # in a way it never is in one returned whole.
+            # Strip leading whitespace after a think block so it isn't visible in the stream.
             if not parts:
                 visible = visible.lstrip()
             if visible:
@@ -355,19 +291,14 @@ def generate_stream(state: dict):
             prompt_chars=len(prompt),
             docs=len(state["graded_docs"]),
             streamed=True,
-            # Ollama reports its counts on the final chunk of a stream, so the
-            # usage fields come from there rather than from a whole response.
+            # Ollama reports counts on the final chunk of a stream.
             **_token_usage(last),
         )
         return {"answer": answer, "sources": sources}
 
 
 def _token_usage(response) -> dict:
-    """Pull Ollama's own token counts off the response, if present.
-
-    Ollama reports eval_count/eval_duration per request, which gives true
-    tokens-per-second without estimating. Absent on a fake LLM in tests.
-    """
+    """Extract Ollama token counts from response metadata."""
     meta = getattr(response, "response_metadata", None) or {}
     usage = {
         k: meta[k]

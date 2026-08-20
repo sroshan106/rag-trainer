@@ -1,15 +1,4 @@
-"""In-process background job registry for long-running requests.
-
-Ingestion and benchmark runs take seconds to minutes -- too long to hold a
-request open. A thread (not asyncio) runs the job body because the work it
-wraps (``ingestion.pipeline.main``, ``run_benchmark.run_all``) is synchronous,
-blocking I/O against Postgres and Ollama.
-
-No task queue, no persistence table: this is a single-user local tool and the
-one requirement -- a status endpoint that survives a browser refresh -- only
-needs the job to outlive the *request*, not the *process*. If that changes,
-this is the module to grow a `jobs` table, not the routes.
-"""
+"""In-process background job registry for long-running requests."""
 
 import threading
 import time
@@ -21,18 +10,11 @@ from typing import Any, Callable, Literal
 JobStatus = Literal["pending", "running", "done", "failed", "cancelled"]
 
 TERMINAL_STATUSES = ("done", "failed", "cancelled")
-
-# Bound how many finished jobs stay addressable, so a long-lived dashboard
-# session can't grow this dict without limit.
 MAX_FINISHED_JOBS = 200
 
 
 class JobAlreadyRunning(Exception):
-    """Raised by ``JobRunner.submit_exclusive`` when the kind is already busy.
-
-    A domain exception rather than an HTTP one so the runner stays free of
-    FastAPI; the route decides what status code that maps to.
-    """
+    """Raised by JobRunner.submit_exclusive when the kind is already busy."""
 
     def __init__(self, job: "Job"):
         self.job = job
@@ -40,12 +22,7 @@ class JobAlreadyRunning(Exception):
 
 
 class JobCancelled(Exception):
-    """Raised by a job body that noticed its cancel event and stopped early.
-
-    Distinct from a plain exception so the runner can mark the job cancelled
-    rather than failed, and -- crucially -- keep whatever partial result the
-    body already published instead of discarding it as a failure.
-    """
+    """Raised by a job body that noticed its cancel event and stopped early."""
 
 
 @dataclass
@@ -70,9 +47,6 @@ class Job:
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def to_dict(self) -> dict:
-        # Under the lock so a poller can't catch a half-updated job -- e.g. a
-        # "running" status next to the progress of the step that just finished.
-        # Never call this while already holding the lock: it is not reentrant.
         with self.lock:
             return self._snapshot()
 
@@ -104,13 +78,7 @@ class ProgressReporter:
         message: str | None = None,
         result: Any = None,
     ) -> None:
-        """Publish progress, and optionally a partial result.
-
-        ``result`` is what lets a long job be useful before it finishes: the
-        body writes its running totals into ``job.result``, so a poller sees
-        real numbers mid-run instead of an empty box until the very end. It is
-        overwritten wholesale each call, not merged.
-        """
+        """Publish progress and optional partial result."""
         with self._lock:
             if progress is not None:
                 self._job.progress = max(0.0, min(1.0, progress))
@@ -153,12 +121,7 @@ class JobRunner:
         fn: Callable[[ProgressReporter], Any],
         params: dict | None = None,
     ) -> Job:
-        """Submit, but only if no job of this kind is active.
-
-        The check and the insert happen under one lock acquisition: doing them
-        as two separate calls leaves a window where two concurrent uploads both
-        see "nothing running" and both start embedding.
-        """
+        """Submit, but only if no job of this kind is active."""
         job = Job(id=str(uuid.uuid4()), kind=kind, params=params, lock=self._lock)
         with self._lock:
             running = self._active_locked(kind)
@@ -178,8 +141,6 @@ class JobRunner:
             try:
                 result = fn(reporter)
                 with self._lock:
-                    # A body can stop early and still return what it has; only
-                    # a None return means "keep what I already published".
                     job.status = "cancelled" if job.cancel_event.is_set() else "done"
                     if job.status == "done":
                         job.progress = 1.0
@@ -187,12 +148,10 @@ class JobRunner:
                         job.result = result
                     job.updated_at = time.time()
             except JobCancelled:
-                # Partial result already on the job stays there -- that is the
-                # whole reason cancellation is not just an exception.
                 with self._lock:
                     job.status = "cancelled"
                     job.updated_at = time.time()
-            except Exception as exc:  # noqa: BLE001 - surfaced to the client, not swallowed
+            except Exception as exc:  # noqa: BLE001
                 with self._lock:
                     job.status = "failed"
                     job.error = f"{exc}\n{traceback.format_exc()}"
@@ -208,14 +167,7 @@ class JobRunner:
             return self._jobs.get(job_id)
 
     def cancel(self, job_id: str) -> bool:
-        """Ask a job to stop. False if it has already finished.
-
-        Only sets the flag -- the status does not flip to "cancelled" until
-        the body actually notices and unwinds, so a caller polling the job
-        keeps seeing "running" until the stop really took effect.
-        """
-        # Lookup and status read share one acquisition -- reading the status
-        # outside it can see a job that finished between the two.
+        """Ask a job to stop. False if it has already finished."""
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None or job.status in TERMINAL_STATUSES:
@@ -224,20 +176,12 @@ class JobRunner:
         return True
 
     def active(self, kind: str) -> Job | None:
-        """The pending-or-running job of this kind, if one exists.
-
-        Lets a route refuse to start a second ingest. A disabled button cannot
-        carry that guarantee -- a second browser tab, or a reloaded page, has
-        no idea the first one is mid-run.
-        """
+        """The pending-or-running job of this kind, if one exists."""
         with self._lock:
             return self._active_locked(kind)
 
     def _active_locked(self, kind: str) -> Job | None:
-        # Caller must already hold ``self._lock`` (it is not reentrant).
         for job in self._jobs.values():
-            # A cancelled-but-still-unwinding job still counts as active:
-            # its threads are alive and the GPU is still busy.
             if job.kind == kind and job.status in ("pending", "running"):
                 return job
         return None
@@ -247,8 +191,6 @@ class JobRunner:
             return sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
 
     def _prune(self) -> None:
-        # Cheap bound on memory: drop the oldest finished jobs once past the
-        # cap. Running/pending jobs are never pruned.
         with self._lock:
             finished = [j for j in self._jobs.values() if j.status in TERMINAL_STATUSES]
             if len(finished) <= MAX_FINISHED_JOBS:

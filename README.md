@@ -1,11 +1,8 @@
 # rag-trainer
 
-A retrieval-augmented generation pipeline that runs entirely on one machine. Documents are
-chunked and embedded into Postgres/pgvector; a query retrieves the relevant chunks and a local
-Ollama model answers from them. No data leaves the host.
+A retrieval-augmented generation pipeline that runs entirely on one machine. Documents are chunked and embedded into Postgres/pgvector; a query retrieves the relevant chunks and a local Ollama model answers from them. No data leaves the host.
 
-Built and tuned against a 4GB GTX 1050, so every default here is chosen under real VRAM
-pressure rather than assumed abundance.
+Built and tuned against a 4GB GTX 1050, so every default here is chosen under real VRAM pressure rather than assumed abundance.
 
 ## Quick start
 
@@ -17,8 +14,7 @@ docker compose exec app python -m src.ingestion.pipeline data/uploads/your.csv
 
 Then open the dashboard at http://localhost:5173. The API is at http://localhost:8000.
 
-You must download a chat model before your first query — there is deliberately no default
-model. Use the **Settings** view in the dashboard, or `ollama pull llama3.2:3b`.
+You must download a chat model before your first query — there is deliberately no default model. Use the **Settings** view in the dashboard, or `ollama pull llama3.2:3b`.
 
 ## Running without Docker
 
@@ -29,8 +25,7 @@ uvicorn src.api.app:app --reload        # API on :8000
 cd ui && npm install && npm run dev     # dashboard on :5173
 ```
 
-Postgres with the pgvector extension and Ollama both still need to be reachable at the URLs in
-`.env`.
+Postgres with the pgvector extension and Ollama both still need to be reachable at the URLs in `.env`.
 
 ## Tests
 
@@ -55,13 +50,6 @@ tests/          unit, integration, and the benchmark harness
 
 ## Documentation
 
-| Document | What it covers |
-|---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Layer map, query flow, ingest flow, where new code goes |
-| [explainer.md](explainer.md) | What RAG is and why each component was chosen |
-| [plan.md](plan.md) | Build phases, measured benchmark baseline, locked decisions |
-| [ui_plan.md](ui_plan.md) | Dashboard design and its phasing |
-| [future.md](future.md) | Post-MVP backlog |
-
-Start with `ARCHITECTURE.md` if you are about to change code, and `explainer.md` if you are
-trying to understand the system for the first time.
+- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture, query/ingest flows, components, configuration lifetimes, and where new code goes.
+- [ROADMAP.md](ROADMAP.md) - Future features, UI backlog, refactoring tasks, and historical benchmark baselines.
+- [CLAUDE.md](CLAUDE.md) - AI assistant instructions and RTK guidelines.

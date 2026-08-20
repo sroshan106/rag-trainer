@@ -70,7 +70,6 @@ export default function SystemView() {
 
   return (
     <div className="flex flex-col gap-6 max-w-4xl mx-auto">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-100">System Monitor</h1>
@@ -88,8 +87,6 @@ export default function SystemView() {
           </span>
         </div>
       </div>
-
-      {/* Telemetry Gauge Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Gauge
           label="CPU Load"
@@ -252,18 +249,9 @@ export default function SystemView() {
 }
 
 function Gauge({ label, value, unit, icon: Icon, color = "blue", warn, detail }) {
-  const display = value === undefined || value === null ? "--" : value.toFixed(0);
+  const display = value == null ? "--" : value.toFixed(0);
   const pct = typeof value === "number" ? Math.min(Math.max(value, 0), 100) : 0;
-
-  const barColor = warn
-    ? "bg-rose-500"
-    : color === "rose"
-      ? "bg-rose-500"
-      : color === "indigo"
-        ? "bg-indigo-500"
-        : color === "purple"
-          ? "bg-purple-500"
-          : "bg-blue-500";
+  const barColor = warn ? "bg-rose-500" : { rose: "bg-rose-500", indigo: "bg-indigo-500", purple: "bg-purple-500" }[color] || "bg-blue-500";
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-4 shadow-sm flex flex-col justify-between">
@@ -271,22 +259,16 @@ function Gauge({ label, value, unit, icon: Icon, color = "blue", warn, detail })
         <span className="text-xs font-medium text-slate-400">{label}</span>
         {Icon && <Icon className="h-4 w-4 text-slate-500" />}
       </div>
-
       <div>
         <div className={`text-2xl font-bold font-mono tracking-tight ${warn ? "text-rose-400" : "text-slate-100"}`}>
-          {display}
-          {value !== undefined && value !== null && (
-            <span className="text-sm font-normal text-slate-400 ml-0.5">{unit}</span>
-          )}
+          {display}{value != null && <span className="text-sm font-normal text-slate-400 ml-0.5">{unit}</span>}
         </div>
-
         {value != null && (
           <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden mt-2">
             <div className={`h-full rounded-full transition-all duration-300 ${barColor}`} style={{ width: `${pct}%` }} />
           </div>
         )}
       </div>
-
       {detail && <div className="text-[11px] font-mono text-slate-400 mt-2 truncate">{detail}</div>}
     </div>
   );

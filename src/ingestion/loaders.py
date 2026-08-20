@@ -1,4 +1,4 @@
-"""Phase 2: load a CSV into LangChain Documents."""
+"""Load a CSV file into LangChain Documents."""
 
 import csv
 from pathlib import Path
@@ -7,12 +7,11 @@ from langchain_core.documents import Document
 
 csv.field_size_limit(10_000_000)
 
-
 TEXT_COLUMN = "text"
 
 
 class UnusableCSV(ValueError):
-    """The file cannot be ingested. Message is written to be shown to a user."""
+    """The file cannot be ingested."""
 
 
 def load_documents(path: str | Path) -> list[Document]:
@@ -20,8 +19,6 @@ def load_documents(path: str | Path) -> list[Document]:
     skipped = 0
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        # Checked rather than assumed: a CSV without this column silently
-        # produced zero documents and an empty ingest that looked successful.
         if reader.fieldnames is None:
             raise UnusableCSV("the file is empty")
         if TEXT_COLUMN not in reader.fieldnames:
@@ -48,9 +45,3 @@ def load_documents(path: str | Path) -> list[Document]:
     return docs
 
 
-if __name__ == "__main__":
-    docs = load_documents("tests/benchmark/data/documents.csv")
-    print(f"loaded {len(docs)} documents")
-    if docs:
-        print("sample metadata:", docs[0].metadata)
-        print("sample content:", docs[0].page_content[:200])

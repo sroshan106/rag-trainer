@@ -35,26 +35,11 @@ export default function Ask() {
   const [historyError, setHistoryError] = useState(null);
   const [models, setModels] = useState([]);
   const [model, setModel] = useState("");
-  const [modelsLoaded, setModelsLoaded] = useState(false);
   const [collection, setCollection] = useState(null);
 
   const inputRef = useRef(null);
   const abortRef = useRef(null);
   const loading = live !== null;
-
-  useEffect(() => {
-    queryModels()
-      .then(({ models: available }) => {
-        setModels(available);
-        setModelsLoaded(true);
-        const saved = localStorage.getItem(MODEL_STORAGE_KEY);
-        setModel(saved && available.includes(saved) ? saved : available[0] || "");
-      })
-      .catch(() => {});
-    collectionStatus()
-      .then(setCollection)
-      .catch(() => {});
-  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -69,8 +54,26 @@ export default function Ask() {
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let ignore = false;
+    queryModels().then(({ models: available }) => {
+      if (ignore) return;
+      setModels(available);
+      const saved = localStorage.getItem(MODEL_STORAGE_KEY);
+      setModel(saved && available.includes(saved) ? saved : available[0] || "");
+    }).catch(() => {});
+    collectionStatus().then((s) => {
+      if (!ignore) setCollection(s);
+    }).catch(() => {});
+    queryHistory(25).then((rows) => {
+      if (!ignore) {
+        setHistory(rows);
+        setHistoryError(null);
+      }
+    }).catch((err) => {
+      if (!ignore) setHistoryError(err.message);
+    });
+    return () => { ignore = true; };
+  }, []);
 
   const hasPending = history.some((entry) => entry.status === "pending");
   useEffect(() => {
@@ -106,18 +109,11 @@ export default function Ask() {
         await streamQuery(trimmed, {
           model: chosenModel || null,
           signal: controller.signal,
-          onEvent: (event) => {
-            if (event.type === "stage") {
-              setLive((cur) =>
-                cur && { ...cur, stage: event.stage, stageDetail: event.detail ?? null },
-              );
-            } else if (event.type === "token") {
-              setLive((cur) => cur && { ...cur, answer: cur.answer + event.text });
-            } else if (event.type === "done") {
-              setLive((cur) => cur && { ...cur, ...event, stage: null });
-            } else if (event.type === "error") {
-              setError(event.detail);
-            }
+          onEvent: (e) => {
+            if (e.type === "stage") setLive(c => c && { ...c, stage: e.stage, stageDetail: e.detail ?? null });
+            else if (e.type === "token") setLive(c => c && { ...c, answer: c.answer + e.text });
+            else if (e.type === "done") setLive(c => c && { ...c, ...e, stage: null });
+            else if (e.type === "error") setError(e.detail);
           },
         });
       } catch (err) {

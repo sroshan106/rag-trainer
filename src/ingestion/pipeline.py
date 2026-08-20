@@ -20,14 +20,9 @@ def ingest(
     progress: ProgressHook | None = None,
     splitter: str = DEFAULT_SPLITTER,
 ) -> dict:
-    """Load, split, and embed ``path``, returning what was written.
-
-    Returns a plain dict rather than printing, so the API can report counts
-    without scraping stdout.
-    """
-
+    """Load, split, and embed path, returning what was written."""
     def report(fraction: float, message: str) -> None:
-        if progress is not None:
+        if progress:
             progress(fraction, message)
 
     report(0.05, f"loading {path}")
@@ -36,12 +31,9 @@ def ingest(
     report(0.2, f"splitting {len(docs)} documents ({splitter})")
     chunks = split_documents(docs, splitter=splitter)
 
-    # Embedding dominates the runtime, so it holds most of the progress range.
     report(0.3, f"embedding {len(chunks)} chunks")
     chunk_ids = build_vectorstore(chunks)
 
-    # Hybrid retrieval's full-text half reads the same rows, so the index is
-    # built here rather than in a separate migration step.
     report(0.95, "building full-text index")
     index_built = ensure_index()
 

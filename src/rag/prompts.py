@@ -1,4 +1,4 @@
-"""Phase 6: prompt template for grounded generation."""
+"""Prompt template and context formatting for grounded generation."""
 
 from src.rag.citations import UNKNOWN_SOURCE
 
@@ -16,8 +16,7 @@ Answer:"""
 
 
 def format_context(docs: list) -> str:
-    parts = []
-    for doc in docs:
-        source = doc.metadata.get("source") or UNKNOWN_SOURCE
-        parts.append(f"[source: {source}]\n{doc.page_content}")
-    return "\n\n".join(parts)
+    return "\n\n".join(
+        f"[source: {doc.metadata.get('source') or UNKNOWN_SOURCE}]\n{doc.page_content}"
+        for doc in docs
+    )

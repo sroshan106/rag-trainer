@@ -39,11 +39,3 @@ def split_documents(
     return build(chunk_size, chunk_overlap).split_documents(docs)
 
 
-if __name__ == "__main__":
-    from src.ingestion.loaders import load_documents
-
-    docs = load_documents("tests/benchmark/data/documents.csv")
-    chunks = split_documents(docs)
-    print(f"{len(docs)} documents -> {len(chunks)} chunks")
-    print("sample chunk:", chunks[0].page_content[:200])
-    print("sample metadata:", chunks[0].metadata)

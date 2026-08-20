@@ -1,8 +1,4 @@
-"""Management of benchmark test suites and custom test files.
-
-Handles both built-in benchmark test files (in tests/benchmark/data) and
-user-uploaded custom test sets (in data/benchmark_uploads).
-"""
+"""Management of benchmark test suites and custom test files."""
 
 import csv
 import io
@@ -36,10 +32,7 @@ def _find_column(fieldnames: list[str], aliases: tuple[str, ...]) -> str | None:
 
 
 def inspect_test_csv(file_content: str | bytes) -> dict:
-    """Inspect CSV content and return metadata: questions count, suite_type, and column mapping.
-
-    Raises UnusableTestFile if the CSV is missing required question columns or has no rows.
-    """
+    """Inspect CSV content and return metadata: questions count, suite_type, and column mapping."""
     if isinstance(file_content, bytes):
         try:
             text = file_content.decode("utf-8")
@@ -114,7 +107,6 @@ def get_builtin_test_files() -> list[dict]:
     if not BUILTIN_DIR.exists():
         return results
 
-    # Built-in question files to include (exclude raw documents corpus)
     builtin_names = [
         "single_passage_answer_questions.csv",
         "multi_passage_answer_questions.csv",

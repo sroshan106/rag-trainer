@@ -59,7 +59,9 @@ export default function Benchmark() {
     cancelledRef.current = false;
     let ignore = false;
 
-    loadHistory();
+    benchmarkHistory().then((data) => {
+      if (!ignore) setHistory(data);
+    }).catch(() => {});
     benchmarkModels()
       .then(({ models: available }) => {
         if (ignore) return;
@@ -78,7 +80,7 @@ export default function Benchmark() {
             if (!cancelledRef.current) setJob(updated);
           },
           isCancelled: () => cancelledRef.current,
-        }).then((finalJob) => {
+        }).then(() => {
           if (!cancelledRef.current) loadHistory();
         });
       })
@@ -458,7 +460,7 @@ function formatMetricsSummary(result) {
 
 function RunParams({ params }) {
   if (!params) return null;
-  const { model, workers, sample, chunk_size, use_cache } = params;
+  const { workers, sample, chunk_size, use_cache } = params;
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
       {workers != null && (

@@ -1,22 +1,6 @@
 """The Benchmark view's backing routes.
 
-Wraps ``tests.benchmark.run_benchmark.run_all`` as a background job -- a full
-run is on the order of minutes (roughly 100 questions, several LLM calls
-each), too long to hold a request open. ``run_all`` interleaves its suites in
-chunks and reports after each one, so the job publishes a real percentage and
-running per-suite metrics as it goes: the view can show numbers for a partial
-run instead of nothing until the end.
-
-Supports modular custom test suites and datasets uploaded by users.
-
-Stopping is cooperative -- ``should_stop`` is polled between chunks, so a
-cancel lands within one chunk rather than instantly. Killing threads mid-LLM
-call would be instant but would throw away answers that are seconds from
-completing (and from being cached).
-
-Imported behind a try/except per the integration contract: ``run_all`` may
-not exist yet in a partially-synced checkout, and the rest of the API must
-keep working if so.
+Wraps tests.benchmark.run_benchmark.run_all as a background job.
 """
 
 from pathlib import Path
@@ -69,8 +53,6 @@ def _run_benchmark(body: BenchmarkRequest, test_paths: list[str] | None = None):
 
 @router.get("/models")
 def list_models() -> dict:
-    # Only models actually pulled -- see src.rag.model_catalog. No "default":
-    # a run must name a model, there is no fallback.
     return {"models": list_installed()}
 
 

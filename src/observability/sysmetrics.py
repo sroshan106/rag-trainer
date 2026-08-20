@@ -1,17 +1,7 @@
 """Host CPU/RAM/disk/GPU collectors for the System dashboard view.
 
-Browsers expose no API for host resource utilization (checked -- see
-ui_plan.md), so metrics are gathered server-side and streamed over SSE. GPU
-telemetry uses NVML directly (via pynvml) rather than shelling out to
-nvidia-smi per sample -- no subprocess per frame, structured values instead
-of parsed CSV. VRAM headroom gets top billing deliberately: on a 4GB card
-running llama3.2:3b alongside nomic-embed-text, VRAM exhaustion is what
-causes Ollama to evict a model and generation latency to fall off a cliff,
-not a gradual slowdown.
-
-Degrades gracefully when NVML is unavailable (no NVIDIA driver, no GPU, or
-pynvml not installed) -- the ``gpu`` field is simply omitted rather than the
-whole collector failing.
+Streams server-side metrics over SSE. GPU telemetry uses NVML directly (via pynvml).
+Degrades gracefully when NVML is unavailable.
 """
 
 import shutil
@@ -25,15 +15,11 @@ try:
     import pynvml
 
     _NVML_IMPORT_ERROR: Exception | None = None
-except Exception as exc:  # pragma: no cover - exercised only without pynvml installed
+except Exception as exc:  # pragma: no cover
     pynvml = None
     _NVML_IMPORT_ERROR = exc
 
-# Every failure NVML itself reports is an ``NVMLError`` subclass. Bound to a
-# name here so the handlers below stay valid even when pynvml is absent (where
-# no NVML call can raise in the first place).
 _NVMLError: type[BaseException] = getattr(pynvml, "NVMLError", Exception)
-
 _NVML_RETRY_COOLDOWN_SECONDS = 30.0
 
 _nvml_ready = False
@@ -41,13 +27,7 @@ _nvml_last_fail_time: float | None = None
 
 
 def _ensure_nvml() -> bool:
-    """Initialize NVML, retrying after a cooldown if a prior attempt failed.
-
-    A failed nvmlInit() at process startup (driver not yet loaded, GPU
-    momentarily busy, container device not mounted yet, ...) is often
-    transient -- latching it permanently would show "no GPU detected" for
-    the rest of the process lifetime even once the GPU becomes reachable.
-    """
+    """Initialize NVML, retrying after a cooldown if a prior attempt failed."""
     global _nvml_ready, _nvml_last_fail_time
     if _nvml_ready:
         return True
@@ -62,11 +42,9 @@ def _ensure_nvml() -> bool:
         _nvml_last_fail_time = None
         return True
     except _NVMLError:
-        # The expected outcome on a host with no NVIDIA driver or no GPU --
-        # stays quiet, since that is a configuration, not a fault.
         _nvml_last_fail_time = time.monotonic()
         return False
-    except Exception as exc:  # noqa: BLE001 - anything else is a real surprise
+    except Exception as exc:  # noqa: BLE001
         log("error", "NVML init raised unexpectedly", error=repr(exc))
         _nvml_last_fail_time = time.monotonic()
         return False
@@ -94,9 +72,6 @@ def collect_gpu() -> list[dict] | None:
                 "memory_total_mb": round(mem.total / 1_048_576, 1),
                 "memory_pct": round(100 * mem.used / mem.total, 1) if mem.total else 0.0,
             }
-            # Temperature and power are genuinely optional readings -- plenty
-            # of cards (and most virtualized ones) report NVML_ERROR_NOT_
-            # SUPPORTED for them -- so a missing field here is not a fault.
             try:
                 device["temperature_c"] = pynvml.nvmlDeviceGetTemperature(
                     handle, pynvml.NVML_TEMPERATURE_GPU
@@ -110,13 +85,9 @@ def collect_gpu() -> list[dict] | None:
             devices.append(device)
         return devices
     except _NVMLError as exc:
-        # NVML initialized fine, so this is a real fault (driver hiccup, device
-        # fell off the bus), not an absent GPU -- degrade this frame rather
-        # than take down the metrics stream, but say why: silently returning
-        # None here is what made a broken GPU look like no GPU at all.
         log("warning", "GPU metrics unavailable: NVML query failed", error=str(exc))
         return None
-    except Exception as exc:  # noqa: BLE001 - unexpected, but must not kill the stream
+    except Exception as exc:  # noqa: BLE001
         log("error", "GPU metrics collector raised unexpectedly", error=repr(exc))
         return None
 

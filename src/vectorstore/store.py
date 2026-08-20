@@ -43,10 +43,7 @@ def build_vectorstore(
 
 
 def load_vectorstore(connection: str | None = None) -> PGVector:
-    """Query-path store. Embeds on CPU (num_gpu=0) -- generation already
-    fills the card's ~4GB, and a query embeds one short string, so CPU
-    keeps the model's VRAM free for the LLM at negligible latency cost.
-    """
+    """Query-path vectorstore instance (embeds on CPU to preserve GPU VRAM)."""
     connection = connection or os.environ["DATABASE_URL"]
     return PGVector(
         embeddings=_embeddings(num_gpu=0),
@@ -56,7 +53,7 @@ def load_vectorstore(connection: str | None = None) -> PGVector:
 
 
 def delete_chunks(chunk_ids: list[str], connection: str | None = None) -> None:
-    """Remove specific stored chunks by id, e.g. everything one file added."""
+    """Remove specific stored chunks by id."""
     if not chunk_ids:
         return
     load_vectorstore(connection).delete(ids=chunk_ids)
@@ -71,16 +68,7 @@ WHERE c.name = :collection
 
 
 def count_chunks(connection: str | None = None) -> int:
-    """How many chunks are stored in the collection.
-
-    Queried directly rather than through PGVector: the UI asks this on every
-    page load only to tell "nothing ingested yet" apart from "asked something
-    the corpus doesn't cover", and building a store (and its embeddings client)
-    for a COUNT would be the expensive way to answer it. Returns 0 when the
-    collection -- or the whole schema -- doesn't exist yet.
-    """
-    # Shared engine, so the per-page-load count reuses a pool instead of
-    # building and discarding one. Never disposed here for that reason.
+    """Return total stored chunks count in the collection, or 0 if missing/empty."""
     engine = get_engine(connection)
     try:
         with engine.connect() as conn:

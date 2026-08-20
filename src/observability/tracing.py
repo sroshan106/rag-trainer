@@ -1,19 +1,7 @@
-"""Phase 5: node-level tracing, logging, and latency instrumentation.
+"""Node-level tracing, logging, and latency instrumentation.
 
-Emits one structured JSON record per graph node with its duration and the
-fields that node chose to expose — retrieval scores, the grading cutoff, the
-generation token counts. That record is both the trace and the latency sample,
-so there is no second timing path to keep in sync.
-
-Off by default; enable with RAG_TRACE=true. Kept local deliberately: no
-LangSmith, no hosted collector, nothing leaves the machine.
-
-Spans can also be captured in-process rather than logged, which is how
-``tests/benchmark/run_latency.py`` aggregates percentiles:
-
-    with tracing.collect() as spans:
-        ask("some query")
-    # spans is a list of {"node": ..., "duration_ms": ..., ...}
+Emits structured JSON records per span/graph node with duration and details.
+Enabled with RAG_TRACE=true or captured via collect().
 """
 
 import contextvars
@@ -31,9 +19,7 @@ LOGGER_NAME = "rag.trace"
 
 logger = logging.getLogger(LOGGER_NAME)
 
-# Fields the current node has attached via detail(). None when no span is open.
 _details: contextvars.ContextVar = contextvars.ContextVar("span_details", default=None)
-# When a collect() block is active, spans are appended here instead of only logged.
 _sink: contextvars.ContextVar = contextvars.ContextVar("span_sink", default=None)
 
 
@@ -68,11 +54,7 @@ def _emit(span: dict) -> None:
 
 @contextmanager
 def span(name: str):
-    """Record one named span, if tracing is on or a collect() block is active.
-
-    Used directly for spans that are not graph nodes — the end-to-end timing in
-    ``ask()``, for instance.
-    """
+    """Record one named span if tracing is on or collect() is active."""
     if not tracing_enabled() and _sink.get() is None:
         yield
         return
@@ -92,12 +74,7 @@ def span(name: str):
 
 
 def traced(name: str):
-    """Decorate a graph node so each call records a span.
-
-    Skips instrumentation entirely when tracing is disabled and nothing is
-    collecting, so the normal query path pays nothing.
-    """
-
+    """Decorate a graph node so each call records a span."""
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(state):

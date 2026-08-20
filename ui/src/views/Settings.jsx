@@ -235,9 +235,36 @@ export default function Settings() {
   const infoMap = { ...DEFAULT_MODEL_METADATA, ...(data?.model_info || {}) };
   const rerankModels = data?.rerank_models || DEFAULT_RERANK_CATALOG;
 
+  const tabConfigs = {
+    chat: {
+      title: "Chat Generation Models",
+      subtitle: "Downloaded models are instantly available in Ask and Benchmark views",
+      rows: data?.catalog.map((m) => ({ name: m, installed: data.installed.includes(m) })),
+    },
+    embed: {
+      title: "Vector Embedding Models",
+      subtitle: data ? `Active vector embedding model: ${data.active_embed_model || "nomic-embed-text"}` : "Downloadable models for vectorizing document chunks",
+      rows: data?.embed_models.map((m) => ({
+        name: m,
+        installed: data.embed_installed.includes(m),
+        active: (data.active_embed_model || "nomic-embed-text") === m,
+      })),
+    },
+    rerank: {
+      title: "Cross-Encoder Reranker Models",
+      subtitle: data ? `Status: ${data.rerank_enabled ? "Enabled" : "Disabled"} (Active model: ${data.active_rerank_model || data.rerank_model})` : "Pre-download cross-encoder models from HuggingFace to cache locally",
+      rows: rerankModels.map((m) => ({
+        name: m,
+        installed: Array.isArray(data?.rerank_installed) ? data.rerank_installed.includes(m) : data?.rerank_installed && m === data?.rerank_model,
+        active: (data?.active_rerank_model || data?.rerank_model) === m,
+      })),
+    },
+  };
+
+  const currentTab = tabConfigs[activeTab];
+
   return (
     <div className="flex flex-col gap-6 max-w-4xl mx-auto">
-      {/* Page Header */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-slate-100">Model Management</h1>
         <p className="text-sm text-slate-400 mt-1">
@@ -255,7 +282,6 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Tab Selector */}
       <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#111726]/90 border border-slate-800 self-start">
         {TABS.map((tab) => {
           const Icon = tab.icon;
@@ -278,75 +304,14 @@ export default function Settings() {
         })}
       </div>
 
-      {/* Tab Panels */}
-      {activeTab === "chat" && (
+      {currentTab && (
         <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
           <div className="mb-4 pb-3 border-b border-slate-800/80">
-            <h2 className="text-base font-bold text-slate-100">Chat Generation Models</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Downloaded models are instantly available in Ask and Benchmark views
-            </p>
+            <h2 className="text-base font-bold text-slate-100">{currentTab.title}</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{currentTab.subtitle}</p>
           </div>
           <ModelTable
-            rows={data?.catalog.map((m) => ({
-              name: m,
-              installed: data.installed.includes(m),
-            }))}
-            infoMap={infoMap}
-            job={(m) => jobs[m]}
-            onDownload={download}
-            onDeleteRequest={(row, info) => setModelToDelete({ name: row.name, active: row.active, info })}
-            deletingModel={deletingModel}
-          />
-        </div>
-      )}
-
-      {activeTab === "embed" && (
-        <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
-          <div className="mb-4 pb-3 border-b border-slate-800/80">
-            <h2 className="text-base font-bold text-slate-100">Vector Embedding Models</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {data
-                ? `Active vector embedding model: ${data.active_embed_model || "nomic-embed-text"}`
-                : "Downloadable models for vectorizing document chunks"}
-            </p>
-          </div>
-          <ModelTable
-            rows={data?.embed_models.map((m) => ({
-              name: m,
-              installed: data.embed_installed.includes(m),
-              active: (data.active_embed_model || "nomic-embed-text") === m,
-            }))}
-            infoMap={infoMap}
-            job={(m) => jobs[m]}
-            onDownload={download}
-            onDeleteRequest={(row, info) => setModelToDelete({ name: row.name, active: row.active, info })}
-            deletingModel={deletingModel}
-          />
-        </div>
-      )}
-
-      {activeTab === "rerank" && (
-        <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
-          <div className="mb-4 pb-3 border-b border-slate-800/80">
-            <h2 className="text-base font-bold text-slate-100">Cross-Encoder Reranker Models</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {data
-                ? `Status: ${data.rerank_enabled ? "Enabled" : "Disabled"} (Active model: ${data.active_rerank_model || data.rerank_model})`
-                : "Pre-download cross-encoder models from HuggingFace to cache locally"}
-            </p>
-          </div>
-          <ModelTable
-            rows={rerankModels.map((m) => {
-              const isInstalled = Array.isArray(data?.rerank_installed)
-                ? data.rerank_installed.includes(m)
-                : data?.rerank_installed && m === data?.rerank_model;
-              return {
-                name: m,
-                installed: isInstalled,
-                active: (data?.active_rerank_model || data?.rerank_model) === m,
-              };
-            })}
+            rows={currentTab.rows}
             infoMap={infoMap}
             job={(m) => jobs[m]}
             onDownload={download}

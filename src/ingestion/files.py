@@ -1,13 +1,4 @@
-"""Persistent record of uploaded/ingested files, keyed by content hash.
-
-Kept in the same Postgres instance as query history, in its own table: this
-is a record of what was *ingested*, not part of retrieval. The hash is what
-lets the upload route recognize "this exact file already went in" and refuse
-to store and embed it a second time, regardless of what it was named.
-
-Writing this record must never break an ingest that otherwise succeeded --
-failures here are logged and swallowed, same as query history.
-"""
+"""Backing storage for uploaded documents."""
 
 import hashlib
 import json
@@ -35,14 +26,9 @@ ingested_files = sa.Table(
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, index=True),
     sa.Column("filename", sa.Text, nullable=False),
     sa.Column("stored_path", sa.Text, nullable=False),
-    # Unique, not just indexed: the upload route relies on a lookup by hash
-    # to decide whether a file is a duplicate before it queues an ingest.
     sa.Column("sha256", sa.String(64), nullable=False, unique=True, index=True),
     sa.Column("size_bytes", sa.Integer, nullable=False),
     sa.Column("documents", sa.Integer, nullable=True),
-    # Filled in once the ingest job finishes -- the vector store's ids for
-    # every chunk this file produced, so "clear this file" knows exactly what
-    # to delete. Null while the job is still running.
     sa.Column("chunk_ids", JSONB, nullable=True),
 )
 

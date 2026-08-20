@@ -1,12 +1,4 @@
-"""Optional extension: deterministic source citations.
-
-The generation model is not reliable at following the inline-citation
-instruction in RAG_PROMPT, so sources are collected in code from the
-documents that actually reached the prompt. This is document-level
-attribution, not sentence-level.
-
-Disable with RAG_CITATIONS=false to fall back to answer-only output.
-"""
+"""Deterministic document-level source citations."""
 
 from src.config import env_flag
 

@@ -1,8 +1,4 @@
-"""Shared environment-variable parsing.
-
-Keeps the truthiness convention identical across RAG_CITATIONS, RAG_TRACE, and
-any flag added later — one definition of what counts as "off".
-"""
+"""Shared environment-variable parsing."""
 
 import os
 

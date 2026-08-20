@@ -1,10 +1,4 @@
-"""The Ingest view's backing routes: run the pipeline as a background job.
-
-Upload is the only way in -- there is no server-side path to ingest on
-request, so the dashboard can't be pointed at an arbitrary file on the host.
-Uploads are refused while an ingest is already running: embedding the same
-rows twice appends duplicates to the collection rather than replacing them.
-"""
+"""Routes for adding documents to the system."""
 
 import hashlib
 import uuid
@@ -22,11 +16,8 @@ from src.vectorstore.store import delete_chunks
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
-# Uploads land beside the bundled corpus, which is already gitignored.
 UPLOAD_DIR = Path("data/uploads")
 
-# Generous for a CSV of text, small enough that a mistaken upload cannot fill
-# the disk before it is rejected.
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
 JOB_KIND = "ingest"
@@ -48,8 +39,6 @@ def _ingest_job(path: str, file_record_id: str, splitter: str):
 
 
 def _submit(path: str, file_record_id: str, splitter: str) -> dict:
-    # The runner decides, not this function: checking here and submitting there
-    # leaves a window where two concurrent uploads both see an idle runner.
     try:
         job = runner.submit_exclusive(JOB_KIND, _ingest_job(path, file_record_id, splitter))
     except JobAlreadyRunning as exc:
@@ -74,19 +63,12 @@ def upload_and_ingest(
             status_code=422,
             detail=f"unknown splitter {splitter!r} -- choose from {list(SPLITTERS)}",
         )
-    # No pre-flight "is an ingest running" check here: the only one that can be
-    # trusted is the one the runner takes atomically with the submit, below.
-
-    # The client's filename is used for display only; the stored name is
-    # generated, so a crafted name cannot escape the upload directory.
     original = Path(file.filename or "upload.csv").name
     if not original.lower().endswith(".csv"):
         raise HTTPException(status_code=415, detail="only .csv files are supported")
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     target = UPLOAD_DIR / f"{uuid.uuid4().hex}-{original}"
-    # Hashed while it's copied rather than re-read afterwards -- one pass over
-    # the upload, not two.
     digest = hashlib.sha256()
     size = 0
     with open(target, "wb") as out:
@@ -103,8 +85,6 @@ def upload_and_ingest(
                 )
     sha256 = digest.hexdigest()
 
-    # Same bytes already ingested under some name -- keep the earlier copy as
-    # the record of truth and refuse to embed the rows a second time.
     duplicate = file_history.find_by_hash(sha256)
     if duplicate is not None:
         target.unlink(missing_ok=True)
@@ -114,8 +94,6 @@ def upload_and_ingest(
             f"on {duplicate['created_at']}",
         )
 
-    # Parsed before the job starts so a malformed CSV fails the request the
-    # user is watching, rather than a background job they have to go read.
     try:
         documents = len(load_documents(target))
     except UnusableCSV as exc:
@@ -139,8 +117,6 @@ def upload_and_ingest(
     try:
         return _submit(str(target), record_id, splitter)
     except HTTPException:
-        # Lost the race for the single ingest slot. Undo the record and the
-        # saved copy, or a retry would be refused as a duplicate of itself.
         target.unlink(missing_ok=True)
         file_history.delete(record_id)
         raise
@@ -148,16 +124,13 @@ def upload_and_ingest(
 
 @router.get("/history", response_model=list[IngestFileEntry])
 def list_ingested_files(limit: int = 50) -> list[dict]:
-    """The provenance/dedup log: what was uploaded, its hash, and where the
-    saved copy lives."""
+    """List ingested files."""
     return file_history.recent(limit)
 
 
 @router.delete("/files/{file_id}")
 def delete_ingested_file(file_id: str) -> dict:
-    """Undo one upload: drop its chunks from the vector store, delete the
-    saved copy, and remove its record -- a re-upload of the same bytes is no
-    longer treated as a duplicate afterwards."""
+    """Delete an uploaded file."""
     if runner.active(JOB_KIND) is not None:
         raise HTTPException(status_code=409, detail="an ingest is running")
 
@@ -174,6 +147,6 @@ def delete_ingested_file(file_id: str) -> dict:
 
 @router.get("/active", response_model=JobResponse | None)
 def active_ingest() -> dict | None:
-    """Lets the view re-attach to a run in progress after a page reload."""
+    """Get the active ingest job."""
     job = runner.active(JOB_KIND)
     return job.to_dict() if job else None

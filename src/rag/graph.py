@@ -20,12 +20,7 @@ from src.rag.nodes import (
 
 
 def _resolve_model(model: str | None) -> str:
-    """No default: a caller must name an installed model or get a clear error.
-
-    Catalog membership only -- whether it's actually pulled is the API
-    layer's job (src.rag.model_catalog), which is where a request first
-    lands and where the "go download it" message belongs.
-    """
+    """Caller must name a model in AVAILABLE_MODELS."""
     if model not in AVAILABLE_MODELS:
         raise ValueError(
             f"model is required -- choose one of {list(AVAILABLE_MODELS)}"
@@ -66,12 +61,8 @@ graph = build_graph()
 
 def ask(query: str, model: str | None = None) -> dict:
     """Return the answer plus the sources it was grounded in.
-
-    ``model`` picks which of AVAILABLE_MODELS answers the query -- required,
-    no default; raises ``ValueError`` if omitted or unrecognized. ``sources`` is empty when the
-    citations extension is disabled. The exchange is also written to the
-    query history table unless RAG_HISTORY=false; that write cannot fail the
-    call.
+    
+    Model is required. Exchange is written to query history table.
     """
     resolved_model = _resolve_model(model)
     started = time.perf_counter()
@@ -102,25 +93,9 @@ def ask(query: str, model: str | None = None) -> dict:
 
 def ask_stream(query: str, model: str | None = None):
     """Stream the same work ``ask`` does, as a sequence of event dicts.
-
-    Events are ``{"type": ...}`` dicts, in this order:
-
-    * ``stage``  -- a node is starting: retrieve, grade, or generate. Carries
-      the counts the previous node produced, so the caller can say "reranked
-      20 down to 5" instead of an untimed spinner.
-    * ``token``  -- a fragment of the answer.
-    * ``done``   -- the finished answer, its sources, and the same latency
-      breakdown ``ask`` records.
-    * ``error``  -- the query failed; the generator ends after it.
-
-    The graph is stepped node by node here rather than through the compiled
-    ``graph.invoke``: the stage boundaries and the partial answer are the whole
-    point of this path, and neither survives a single blocking call. The node
-    order is the same one ``build_graph`` wires, and the linear graph is what
-    makes stepping it by hand safe.
-
-    Closing this generator (client disconnect, or Cancel) stops generation and
-    records the run as cancelled with whatever text had already streamed.
+    
+    Yields stages (retrieve, grade, generate), tokens, and done/error events.
+    Closing this generator early stops generation and cancels the run.
     """
     resolved_model = _resolve_model(model)
     started = time.perf_counter()
@@ -202,9 +177,7 @@ def main() -> int:
         tracing.configure_logging()
     query = " ".join(sys.argv[1:]) or "What is this document collection about?"
 
-    # CLI convenience only -- picks whichever installed model comes first
-    # rather than making an ad hoc script pass --model. The API has no such
-    # fallback; see _resolve_model.
+    # CLI convenience: picks the first installed model.
     from src.rag.model_catalog import list_installed
 
     installed = list_installed()
