@@ -69,6 +69,12 @@ export function uploadAndIngest(file, splitter = null) {
   return postForm("/ingest/upload", form);
 }
 
+export const documentMeta = (fileId) => request(`/documents/${fileId}`);
+export const documentUnits = (fileId, { offset = 0, limit = 50 } = {}) =>
+  request(`/documents/${fileId}/units?offset=${offset}&limit=${limit}`);
+export const documentUnit = (fileId, index) =>
+  request(`/documents/${fileId}/units/${index}`);
+
 export const startBenchmark = ({
   workers = 4,
   sample = null,
@@ -79,6 +85,7 @@ export const startBenchmark = ({
 } = {}) => postJson("/benchmark", { workers, sample, use_cache, chunk_size, model, test_files });
 
 export const benchmarkModels = () => request("/benchmark/models");
+export const compareQuery = (query, model = null) => postJson("/benchmark/compare", { query, model });
 export const getBenchmarkTestFiles = () => request("/benchmark/test-files");
 
 export function uploadBenchmarkTestFile(file) {

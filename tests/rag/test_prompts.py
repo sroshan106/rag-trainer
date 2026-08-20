@@ -3,32 +3,34 @@ from langchain_core.documents import Document
 from src.rag.prompts import RAG_PROMPT, format_context
 
 
-def test_format_context_includes_source_metadata():
+def test_format_context_joins_the_chunks():
     docs = [
-        Document(page_content="fact one", metadata={"source": "a.txt"}),
-        Document(page_content="fact two", metadata={"source": "b.txt"}),
+        Document(page_content="fact one", metadata={"filename": "a.txt"}),
+        Document(page_content="fact two", metadata={"filename": "b.txt"}),
     ]
 
     result = format_context(docs)
 
-    assert "[source: a.txt]\nfact one" in result
-    assert "[source: b.txt]\nfact two" in result
+    assert result == "fact one\n\nfact two"
 
 
-def test_format_context_defaults_to_unknown_source():
-    docs = [Document(page_content="fact", metadata={})]
+def test_format_context_does_not_leak_provenance_into_the_prompt():
+    """Each chunk used to be prefixed with a [source: ...] header.
 
-    result = format_context(docs)
-
-    assert "[source: unknown]\nfact" in result
-
-
-def test_format_context_defaults_null_source_to_unknown():
-    docs = [Document(page_content="fact", metadata={"source": None})]
+    It spent prompt budget on every query and invited the model to name a file
+    in its prose despite being told not to; citations are built from metadata
+    beside the answer instead.
+    """
+    docs = [Document(page_content="fact", metadata={"filename": "a.txt", "unit_index": 3})]
 
     result = format_context(docs)
 
-    assert "[source: unknown]\nfact" in result
+    assert result == "fact"
+    assert "a.txt" not in result
+
+
+def test_format_context_of_nothing_is_empty():
+    assert format_context([]) == ""
 
 
 def test_rag_prompt_grounds_and_allows_refusal():

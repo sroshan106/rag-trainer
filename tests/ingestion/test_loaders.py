@@ -1,4 +1,9 @@
-import csv
+"""Documents built from units, and the provenance metadata they carry.
+
+Unit boundaries and numbering are covered in test_units.py; what is pinned here
+is the metadata a retrieved chunk needs in order to be traced back to a file.
+"""
+
 import json
 
 import pytest
@@ -6,140 +11,84 @@ import pytest
 from src.ingestion.loaders import UnsupportedFileType, load_documents
 
 
-def _write_csv(path, rows):
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["index", "source_url", "text"])
-        writer.writeheader()
-        writer.writerows(rows)
+def test_load_documents_stamps_provenance_onto_every_document(tmp_path):
+    path = tmp_path / "docs.csv"
+    path.write_text("passage,id\nhello world,9797\n", encoding="utf-8")
 
-
-def test_load_documents_maps_fields_to_document(tmp_path):
-    csv_path = tmp_path / "docs.csv"
-    _write_csv(
-        csv_path,
-        [{"index": "1", "source_url": "http://example.com/a", "text": "hello world"}],
-    )
-
-    docs = load_documents(csv_path)
+    docs = load_documents(path, file_id="file-1", filename="original.csv")
 
     assert len(docs) == 1
-    assert docs[0].page_content == "hello world"
-    assert docs[0].metadata == {"source": "http://example.com/a", "row_index": "1"}
+    assert docs[0].metadata["file_id"] == "file-1"
+    assert docs[0].metadata["filename"] == "original.csv"
+    assert docs[0].metadata["unit_kind"] == "row"
+    assert docs[0].metadata["unit_index"] == 1
 
 
-def test_load_documents_skips_empty_text_rows(tmp_path):
-    csv_path = tmp_path / "docs.csv"
-    _write_csv(
-        csv_path,
-        [
-            {"index": "1", "source_url": "http://example.com/a", "text": ""},
-            {"index": "2", "source_url": "http://example.com/b", "text": "   "},
-            {"index": "3", "source_url": "http://example.com/c", "text": "kept"},
-        ],
-    )
+def test_unit_index_locates_the_row_while_row_index_holds_the_dataset_key(tmp_path):
+    """These two must not be conflated -- see KEY_COLUMNS in units.py."""
+    path = tmp_path / "corpus.csv"
+    path.write_text("passage,id\nfirst,9797\nsecond,15908939\n", encoding="utf-8")
 
-    docs = load_documents(csv_path)
+    docs = load_documents(path)
 
-    assert len(docs) == 1
-    assert docs[0].page_content == "kept"
+    assert [d.metadata["unit_index"] for d in docs] == [1, 2]
+    assert [d.metadata["row_index"] for d in docs] == ["9797", "15908939"]
 
 
-def test_load_documents_empty_file_returns_empty_list(tmp_path):
-    csv_path = tmp_path / "docs.csv"
-    _write_csv(csv_path, [])
+def test_row_index_is_none_when_the_file_declares_no_identifier(tmp_path):
+    path = tmp_path / "plain.csv"
+    path.write_text("passage\njust text\n", encoding="utf-8")
 
-    assert load_documents(csv_path) == []
-
-
-def test_load_documents_reads_a_txt_file(tmp_path):
-    txt_path = tmp_path / "notes.txt"
-    txt_path.write_text("hello world", encoding="utf-8")
-
-    docs = load_documents(txt_path)
-
-    assert len(docs) == 1
-    assert docs[0].page_content == "hello world"
+    assert load_documents(path)[0].metadata["row_index"] is None
 
 
-def test_load_documents_reads_a_md_file(tmp_path):
-    md_path = tmp_path / "notes.md"
-    md_path.write_text("# heading\nbody text", encoding="utf-8")
+def test_filename_defaults_to_the_path_when_not_given(tmp_path):
+    path = tmp_path / "notes.txt"
+    path.write_text("hello", encoding="utf-8")
 
-    docs = load_documents(md_path)
-
-    assert len(docs) == 1
-    assert "body text" in docs[0].page_content
+    assert load_documents(path)[0].metadata["filename"] == "notes.txt"
 
 
-def test_load_documents_empty_txt_returns_empty_list(tmp_path):
-    txt_path = tmp_path / "empty.txt"
-    txt_path.write_text("   ", encoding="utf-8")
+def test_missing_file_id_is_tolerated(tmp_path):
+    """files.record returns None when the provenance write fails."""
+    path = tmp_path / "notes.txt"
+    path.write_text("hello", encoding="utf-8")
 
-    assert load_documents(txt_path) == []
+    docs = load_documents(path, file_id=None)
 
-
-def test_load_documents_reads_a_json_array(tmp_path):
-    json_path = tmp_path / "docs.json"
-    json_path.write_text(
-        json.dumps([{"text": "hello", "source_url": "http://a"}, {"text": "  "}]),
-        encoding="utf-8",
-    )
-
-    docs = load_documents(json_path)
-
-    assert len(docs) == 1
-    assert docs[0].page_content == "hello"
-    assert docs[0].metadata["source"] == "http://a"
+    assert docs[0].metadata["file_id"] is None
 
 
-def test_load_documents_reads_a_jsonl_file(tmp_path):
-    jsonl_path = tmp_path / "docs.jsonl"
-    jsonl_path.write_text('{"text": "a"}\n{"text": "b"}\n', encoding="utf-8")
+def test_a_url_column_rides_along_when_present(tmp_path):
+    path = tmp_path / "docs.csv"
+    path.write_text("text,source_url\nhello,https://example.com/a\n", encoding="utf-8")
 
-    docs = load_documents(jsonl_path)
-
-    assert [d.page_content for d in docs] == ["a", "b"]
+    assert load_documents(path)[0].metadata["url"] == "https://example.com/a"
 
 
-def test_load_documents_maps_a_passage_column_by_alias(tmp_path):
-    csv_path = tmp_path / "bioasq.csv"
-    csv_path.write_text(
-        'passage,id\n"a fairly long passage of biomedical text here",9797\n',
-        encoding="utf-8",
-    )
+def test_whole_row_is_embedded_without_picking_a_text_column(tmp_path):
+    """The original complaint: a passage,id file needed no 'text' column."""
+    path = tmp_path / "bioasq.csv"
+    path.write_text("passage,id\nsome biomedical text,9797\n", encoding="utf-8")
 
-    docs = load_documents(csv_path)
+    content = load_documents(path)[0].page_content
 
-    assert len(docs) == 1
-    assert docs[0].page_content == "a fairly long passage of biomedical text here"
-    assert docs[0].metadata["row_index"] == "9797"
+    assert "some biomedical text" in content
 
 
-def test_load_documents_guesses_the_text_column_by_content(tmp_path):
-    csv_path = tmp_path / "unknown_headers.csv"
-    csv_path.write_text(
-        "ref,notes\n"
-        '101,"this column just happens to hold the actual long free text content"\n',
-        encoding="utf-8",
-    )
+def test_load_documents_reads_every_supported_format(tmp_path):
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
+    (tmp_path / "a.md").write_text("# hi", encoding="utf-8")
+    (tmp_path / "a.json").write_text(json.dumps([{"text": "x"}]), encoding="utf-8")
+    (tmp_path / "a.jsonl").write_text('{"text": "y"}\n', encoding="utf-8")
 
-    docs = load_documents(csv_path)
-
-    assert len(docs) == 1
-    assert "long free text content" in docs[0].page_content
-
-
-def test_load_documents_raises_when_no_column_looks_like_text(tmp_path):
-    csv_path = tmp_path / "ids_only.csv"
-    csv_path.write_text("index,source_url\n1,http://x\n", encoding="utf-8")
-
-    with pytest.raises(Exception, match="text"):
-        load_documents(csv_path)
+    for name in ("a.txt", "a.md", "a.json", "a.jsonl"):
+        assert len(load_documents(tmp_path / name)) == 1, name
 
 
 def test_load_documents_raises_for_unsupported_extension(tmp_path):
-    docx_path = tmp_path / "notes.docx"
-    docx_path.write_text("hello", encoding="utf-8")
+    path = tmp_path / "notes.docx"
+    path.write_text("hello", encoding="utf-8")
 
     with pytest.raises(UnsupportedFileType):
-        load_documents(docx_path)
+        load_documents(path)

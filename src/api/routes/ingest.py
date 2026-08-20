@@ -1,7 +1,6 @@
 """Routes for adding documents to the system."""
 
 import hashlib
-import json
 import uuid
 from pathlib import Path
 
@@ -9,7 +8,12 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from src.api.schemas import IngestFileEntry, JobResponse
 from src.ingestion import files as file_history
-from src.ingestion.loaders import SUPPORTED_EXTENSIONS, UnsupportedFileType, UnusableCSV, load_documents
+from src.ingestion.loaders import (
+    SUPPORTED_EXTENSIONS,
+    UnreadableFile,
+    UnsupportedFileType,
+    load_documents,
+)
 from src.ingestion.pipeline import ingest
 from src.ingestion.splitter import DEFAULT_SPLITTER, SPLITTERS
 from src.jobs.runner import JobAlreadyRunning, ProgressReporter, runner
@@ -24,7 +28,7 @@ MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 JOB_KIND = "ingest"
 
 
-def _ingest_job(path: str, file_record_id: str, splitter: str):
+def _ingest_job(path: str, file_record_id: str, splitter: str, filename: str):
     def run(reporter: ProgressReporter) -> dict:
         result = ingest(
             path,
@@ -32,6 +36,8 @@ def _ingest_job(path: str, file_record_id: str, splitter: str):
                 progress=fraction, message=message
             ),
             splitter=splitter,
+            file_id=file_record_id,
+            filename=filename,
         )
         file_history.set_chunk_ids(file_record_id, result.get("chunk_ids", []))
         return result
@@ -39,9 +45,11 @@ def _ingest_job(path: str, file_record_id: str, splitter: str):
     return run
 
 
-def _submit(path: str, file_record_id: str, splitter: str) -> dict:
+def _submit(path: str, file_record_id: str, splitter: str, filename: str) -> dict:
     try:
-        job = runner.submit_exclusive(JOB_KIND, _ingest_job(path, file_record_id, splitter))
+        job = runner.submit_exclusive(
+            JOB_KIND, _ingest_job(path, file_record_id, splitter, filename)
+        )
     except JobAlreadyRunning as exc:
         raise HTTPException(
             status_code=409,
@@ -99,11 +107,11 @@ def upload_and_ingest(
         )
 
     try:
-        documents = len(load_documents(target))
-    except (UnusableCSV, UnsupportedFileType) as exc:
+        documents = len(load_documents(target, filename=original))
+    except (UnreadableFile, UnsupportedFileType) as exc:
         target.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except (UnicodeDecodeError, OSError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, OSError) as exc:
         target.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail=f"could not read the file: {exc}") from exc
 
@@ -119,7 +127,7 @@ def upload_and_ingest(
         documents=documents,
     )
     try:
-        return _submit(str(target), record_id, splitter)
+        return _submit(str(target), record_id, splitter, original)
     except HTTPException:
         target.unlink(missing_ok=True)
         file_history.delete(record_id)

@@ -104,7 +104,7 @@ export default function Ask() {
         query: trimmed,
         model: chosenModel || null,
         answer: "",
-        sources: [],
+        citations: [],
         stage: "retrieve",
         stageDetail: null,
       });

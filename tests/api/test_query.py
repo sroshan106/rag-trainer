@@ -12,10 +12,25 @@ client = TestClient(app)
 TEST_MODEL = "llama3.2:3b"
 
 
-def test_query_returns_answer_and_sources(monkeypatch):
+CITATION = {
+    "file_id": "file-1",
+    "filename": "corpus.csv",
+    "unit_kind": "row",
+    "unit_index": 42,
+    "label": "row 42",
+    "url": None,
+}
+
+
+def test_query_returns_answer_and_citations(monkeypatch):
     monkeypatch.setattr(
         "src.api.routes.query.ask",
-        lambda q, model=None: {"answer": f"answer to {q}", "sources": ["http://example.com"]},
+        lambda q, model=None: {
+            "answer": f"answer to {q}",
+            "citations": [CITATION],
+            "refused": False,
+            "confidence": 0.83,
+        },
     )
 
     resp = client.post("/api/query", json={"query": "what is this?", "model": TEST_MODEL})
@@ -23,7 +38,9 @@ def test_query_returns_answer_and_sources(monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["answer"] == "answer to what is this?"
-    assert body["sources"] == ["http://example.com"]
+    assert body["citations"] == [CITATION]
+    assert body["refused"] is False
+    assert body["confidence"] == 0.83
 
 
 def test_query_passes_the_chosen_model_through(monkeypatch):
@@ -31,7 +48,7 @@ def test_query_passes_the_chosen_model_through(monkeypatch):
 
     def fake_ask(q, model=None):
         seen["model"] = model
-        return {"answer": "a", "sources": []}
+        return {"answer": "a", "citations": [], "refused": False, "confidence": 0.0}
 
     monkeypatch.setattr("src.api.routes.query.ask", fake_ask)
     monkeypatch.setattr("src.api.routes.query.list_installed", lambda: ["qwen3:4b"])
@@ -114,7 +131,14 @@ def test_stream_emits_the_events_ask_stream_produced(monkeypatch):
     def fake_ask_stream(query, model=None):
         yield {"type": "stage", "stage": "retrieve"}
         yield {"type": "token", "text": f"answer to {query}"}
-        yield {"type": "done", "id": "e1", "answer": "done", "sources": ["a.txt"]}
+        yield {
+            "type": "done",
+            "id": "e1",
+            "answer": "done",
+            "citations": [CITATION],
+            "refused": False,
+            "confidence": 0.83,
+        }
 
     monkeypatch.setattr("src.api.routes.query.ask_stream", fake_ask_stream)
 
@@ -124,12 +148,13 @@ def test_stream_emits_the_events_ask_stream_produced(monkeypatch):
     events = _sse_events(resp.text)
     assert [e["type"] for e in events] == ["stage", "token", "done"]
     assert events[1]["text"] == "answer to what is this?"
-    assert events[2]["sources"] == ["a.txt"]
+    assert events[2]["citations"] == [CITATION]
+    assert events[2]["confidence"] == 0.83
 
 
 def test_stream_names_each_sse_event_after_its_type(monkeypatch):
     def fake_ask_stream(query, model=None):
-        yield {"type": "done", "answer": "a", "sources": []}
+        yield {"type": "done", "answer": "a", "citations": [], "refused": False}
 
     monkeypatch.setattr("src.api.routes.query.ask_stream", fake_ask_stream)
 
@@ -143,7 +168,7 @@ def test_stream_passes_the_chosen_model_through(monkeypatch):
 
     def fake_ask_stream(query, model=None):
         seen["model"] = model
-        yield {"type": "done", "answer": "a", "sources": []}
+        yield {"type": "done", "answer": "a", "citations": [], "refused": False}
 
     monkeypatch.setattr("src.api.routes.query.ask_stream", fake_ask_stream)
     monkeypatch.setattr("src.api.routes.query.list_installed", lambda: ["qwen3:4b"])

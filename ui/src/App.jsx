@@ -5,6 +5,7 @@ import Ingest from "./views/Ingest.jsx";
 import SystemView from "./views/System.jsx";
 import Benchmark from "./views/Benchmark.jsx";
 import Settings from "./views/Settings.jsx";
+import DocumentPage from "./views/Document.jsx";
 
 const NAV = [
   { to: "/ask", label: "Ask", icon: MessageSquare },
@@ -59,6 +60,8 @@ export default function App() {
           <Route path="/" element={<Navigate to="/ask" replace />} />
           <Route path="/ask" element={<Ask />} />
           <Route path="/ingest" element={<Ingest />} />
+          {/* Not in NAV: reached from a citation or a knowledge-base entry. */}
+          <Route path="/documents/:fileId" element={<DocumentPage />} />
           <Route path="/system" element={<SystemView />} />
           <Route path="/benchmark" element={<Benchmark />} />
           <Route path="/settings" element={<Settings />} />

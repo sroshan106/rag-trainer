@@ -2,6 +2,7 @@ import pytest
 from langchain_core.documents import Document
 
 from src.rag import nodes
+from src.vectorstore import rerank as rerank_module
 
 
 class FakeVectorstore:
@@ -59,6 +60,29 @@ class FakeCrossEncoder:
     def predict(self, pairs):
         self.pairs = pairs
         return [float(len(self.order) - self.order.index(text)) for _, text in pairs]
+
+
+def _cited(text, unit_index, file_id="file-1"):
+    """A document carrying the provenance ingest stamps on every chunk."""
+    return Document(
+        page_content=text,
+        metadata={
+            "file_id": file_id,
+            "filename": "corpus.csv",
+            "unit_kind": "row",
+            "unit_index": unit_index,
+        },
+    )
+
+
+def _confidence_doc(dense=None, rerank_score=None):
+    """A doc carrying only the score keys confidence_of reads."""
+    metadata = {}
+    if dense is not None:
+        metadata[nodes.SCORE_KEY] = dense
+    if rerank_score is not None:
+        metadata[rerank_module.RERANK_SCORE_KEY] = rerank_score
+    return Document(page_content="x", metadata=metadata)
 
 
 def test_retrieve_node_populates_docs(monkeypatch):
@@ -207,29 +231,28 @@ def test_generate_node_does_not_append_no_think_for_llama(monkeypatch):
     assert "/no_think" not in fake_llm.last_prompt
 
 
-def test_generate_node_collects_sources(monkeypatch):
+def test_generate_node_collects_citations(monkeypatch):
     monkeypatch.delenv("RAG_CITATIONS", raising=False)
     monkeypatch.setattr(nodes, "_get_llm", lambda model=None: FakeLLM("the answer"))
-    docs = [
-        Document(page_content="fact one", metadata={"source": "a.txt"}),
-        Document(page_content="fact two", metadata={"source": "a.txt"}),
-        Document(page_content="fact three", metadata={"source": "b.txt"}),
-    ]
+    docs = [_cited("fact one", 1), _cited("fact two", 1), _cited("fact three", 2)]
 
     result = nodes.generate_node({"query": "what?", "model": "llama3.2:3b", "graded_docs": docs})
 
-    assert result["sources"] == ["a.txt", "b.txt"]
+    assert [c["unit_index"] for c in result["citations"]] == [1, 2]
+    assert result["refused"] is False
 
 
-def test_generate_node_skips_sources_when_disabled(monkeypatch):
+def test_generate_node_skips_citations_when_disabled(monkeypatch):
     monkeypatch.setenv("RAG_CITATIONS", "false")
     monkeypatch.setattr(nodes, "_get_llm", lambda model=None: FakeLLM("the answer"))
-    docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
+    docs = [_cited("fact one", 1)]
 
     result = nodes.generate_node({"query": "what?", "model": "llama3.2:3b", "graded_docs": docs})
 
     assert result["answer"] == "the answer"
-    assert result["sources"] == []
+    assert result["citations"] == []
+    # Turning citations off must not turn the answer into a refusal.
+    assert result["refused"] is False
 
 
 def test_generate_node_uses_the_requested_model(monkeypatch):
@@ -254,10 +277,49 @@ def test_generate_node_raises_when_model_is_absent():
         nodes.generate_node({"query": "q", "graded_docs": docs})
 
 
-def test_generate_node_fallback_has_empty_sources():
+def test_generate_node_fallback_is_marked_refused():
     result = nodes.generate_node({"query": "q", "graded_docs": []})
 
-    assert result["sources"] == []
+    assert result["citations"] == []
+    assert result["refused"] is True
+    assert result["confidence"] == 0.0
+
+
+def test_direct_answer_calls_llm_with_the_raw_query_only(monkeypatch):
+    fake_llm = FakeLLM("the answer")
+    monkeypatch.setattr(nodes, "_get_llm", lambda model=None: fake_llm)
+
+    result = nodes.direct_answer("llama3.2:3b", "what is the capital of France?")
+
+    assert result["answer"] == "the answer"
+    assert fake_llm.last_prompt == "what is the capital of France?"
+
+
+def test_direct_answer_appends_no_think_for_a_thinking_model(monkeypatch):
+    fake_llm = FakeLLM("the answer")
+    monkeypatch.setattr(nodes, "_get_llm", lambda model=None: fake_llm)
+
+    nodes.direct_answer("qwen3:4b", "q")
+
+    assert fake_llm.last_prompt.endswith("/no_think")
+
+
+def test_direct_answer_strips_a_thinking_block(monkeypatch):
+    thinking_output = "reasoning...\n</think>\n\nthe answer"
+    monkeypatch.setattr(nodes, "_get_llm", lambda model=None: FakeLLM(thinking_output))
+
+    result = nodes.direct_answer("qwen3:4b", "q")
+
+    assert result["answer"] == "the answer"
+
+
+def test_direct_answer_reports_generate_ms(monkeypatch):
+    monkeypatch.setattr(nodes, "_get_llm", lambda model=None: FakeLLM("ok"))
+
+    result = nodes.direct_answer("llama3.2:3b", "q")
+
+    assert isinstance(result["generate_ms"], float)
+    assert result["generate_ms"] >= 0
 
 
 def _lexical(content, score, source="a.txt"):
@@ -407,12 +469,14 @@ def test_generate_stream_yields_tokens_and_returns_the_assembled_answer(monkeypa
     monkeypatch.delenv("RAG_CITATIONS", raising=False)
     fake_llm = FakeStreamingLLM(["the ", "answer"])
     monkeypatch.setattr(nodes, "_get_llm", lambda model=None: fake_llm)
-    docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
+    docs = [_cited("fact one", 1)]
 
     tokens, result = _drain(nodes.generate_stream({"query": "what?", "model": "llama3.2:3b", "graded_docs": docs}))
 
     assert tokens == ["the ", "answer"]
-    assert result == {"answer": "the answer", "sources": ["a.txt"]}
+    assert result["answer"] == "the answer"
+    assert [c["unit_index"] for c in result["citations"]] == [1]
+    assert result["refused"] is False
     assert "fact one" in fake_llm.last_prompt
     assert "what?" in fake_llm.last_prompt
 
@@ -435,7 +499,12 @@ def test_generate_stream_refuses_without_graded_docs():
     tokens, result = _drain(nodes.generate_stream({"query": "q", "graded_docs": []}))
 
     assert tokens == [nodes.REFUSAL_ANSWER]
-    assert result == {"answer": nodes.REFUSAL_ANSWER, "sources": []}
+    assert result == {
+        "answer": nodes.REFUSAL_ANSWER,
+        "citations": [],
+        "refused": True,
+        "confidence": 0.0,
+    }
 
 
 def test_generate_stream_uses_the_requested_model(monkeypatch):
@@ -465,14 +534,15 @@ def test_generate_stream_closing_early_stops_the_llm(monkeypatch):
     assert fake_llm.closed is True
 
 
-def test_generate_stream_skips_sources_when_citations_disabled(monkeypatch):
+def test_generate_stream_skips_citations_when_disabled(monkeypatch):
     monkeypatch.setenv("RAG_CITATIONS", "false")
     monkeypatch.setattr(nodes, "_get_llm", lambda model=None: FakeStreamingLLM(["a"]))
-    docs = [Document(page_content="fact", metadata={"source": "a.txt"})]
+    docs = [_cited("fact", 1)]
 
     _, result = _drain(nodes.generate_stream({"query": "q", "model": "llama3.2:3b", "graded_docs": docs}))
 
-    assert result["sources"] == []
+    assert result["citations"] == []
+    assert result["refused"] is False
 
 
 def test_prompt_for_requires_a_model():
@@ -506,4 +576,44 @@ def test_prompt_for_appends_no_think_for_a_thinking_model():
 
 
 def test_refusal_is_the_shared_constant():
-    assert nodes._refusal() == {"answer": nodes.REFUSAL_ANSWER, "sources": []}
+    assert nodes._refusal() == {
+        "answer": nodes.REFUSAL_ANSWER,
+        "citations": [],
+        "refused": True,
+        "confidence": 0.0,
+    }
+
+
+def test_confidence_prefers_the_cross_encoder_score():
+    """It reads query and chunk together; the cosine scores them apart."""
+    docs = [
+        _confidence_doc(dense=0.60, rerank_score=0.91),
+        _confidence_doc(dense=0.99, rerank_score=0.40),
+    ]
+
+    assert nodes.confidence_of(docs) == 0.91
+
+
+def test_confidence_falls_back_to_dense_when_reranking_is_off():
+    assert nodes.confidence_of([_confidence_doc(dense=0.73)]) == 0.73
+
+
+def test_confidence_takes_the_best_chunk_not_the_average():
+    """One strong chunk is enough to answer from."""
+    docs = [
+        _confidence_doc(dense=0.9),
+        _confidence_doc(dense=0.1),
+        _confidence_doc(dense=0.1),
+    ]
+
+    assert nodes.confidence_of(docs) == 0.9
+
+
+def test_confidence_of_nothing_is_zero():
+    assert nodes.confidence_of([]) == 0.0
+
+
+def test_confidence_ignores_a_lexical_only_hit_with_no_comparable_score():
+    lexical_only = Document(page_content="x", metadata={nodes.LEXICAL_KEY: 4.2})
+
+    assert nodes.confidence_of([lexical_only]) == 0.0

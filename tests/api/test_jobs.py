@@ -26,7 +26,7 @@ def _wait_for_job(job_id: str, timeout: float = 5.0) -> dict:
 
 
 def test_ingest_runs_as_background_job_and_reports_counts(monkeypatch, tmp_path):
-    def fake_ingest(path, progress=None, splitter=None):
+    def fake_ingest(path, progress=None, splitter=None, file_id=None, filename=None):
         if progress:
             progress(0.5, "embedding")
         return {

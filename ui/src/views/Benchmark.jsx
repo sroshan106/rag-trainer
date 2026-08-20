@@ -8,10 +8,14 @@ import {
   Sliders,
   AlertCircle,
   AlertTriangle,
+  GitCompare,
+  Clock,
+  Zap,
 } from "lucide-react";
 
 import Card from "../components/Card.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
+import SourceList from "../components/SourceList.jsx";
 import {
   startBenchmark,
   benchmarkHistory,
@@ -19,6 +23,7 @@ import {
   activeBenchmark,
   cancelJob,
   pollJob,
+  compareQuery,
 } from "../api.js";
 
 export default function Benchmark() {
@@ -35,6 +40,12 @@ export default function Benchmark() {
   const [stopping, setStopping] = useState(false);
   const [expandedIds, setExpandedIds] = useState(new Set());
   const cancelledRef = useRef(false);
+
+  const [compareText, setCompareText] = useState("");
+  const [compareModel, setCompareModel] = useState("");
+  const [compareResult, setCompareResult] = useState(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareError, setCompareError] = useState(null);
 
   function toggleExpand(id) {
     setExpandedIds((prev) => {
@@ -68,6 +79,7 @@ export default function Benchmark() {
         setModels(available);
         setModelsLoaded(true);
         setModel((prev) => prev || available[0] || "");
+        setCompareModel((prev) => prev || available[0] || "");
       })
       .catch(() => {});
 
@@ -125,6 +137,21 @@ export default function Benchmark() {
     } catch (err) {
       setError(err.message);
       setStopping(false);
+    }
+  }
+
+  async function onCompare() {
+    const text = compareText.trim();
+    if (!text || !compareModel || compareLoading) return;
+    setCompareLoading(true);
+    setCompareError(null);
+    try {
+      setCompareResult(await compareQuery(text, compareModel));
+    } catch (err) {
+      setCompareError(err.message);
+      setCompareResult(null);
+    } finally {
+      setCompareLoading(false);
     }
   }
 
@@ -298,6 +325,103 @@ export default function Benchmark() {
           </div>
         </div>
       )}
+
+      {/* Retrieval Impact Check */}
+      <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
+        <div className="flex items-center gap-2 text-sm font-semibold text-slate-200 mb-1">
+          <GitCompare className="h-4 w-4 text-blue-400" />
+          <span>Retrieval Impact Check</span>
+        </div>
+        <p className="text-xs text-slate-400 mb-4">
+          Run one query two ways on the same model -- grounded (through retrieval, reranking, and your
+          documents) and direct (the model alone, no context) -- to see what retrieval actually
+          contributes. Not saved to Ask history.
+        </p>
+
+        <div className="flex flex-col gap-3">
+          <textarea
+            rows={2}
+            value={compareText}
+            onChange={(e) => setCompareText(e.target.value)}
+            placeholder="Ask something your documents can answer..."
+            disabled={compareLoading}
+            className="w-full resize-none rounded-xl border border-slate-700/80 bg-slate-900/90 px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 transition-all"
+          />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-slate-400">Model</span>
+              <div className="relative">
+                <select
+                  value={compareModel}
+                  onChange={(e) => setCompareModel(e.target.value)}
+                  disabled={compareLoading || models.length === 0}
+                  className="appearance-none rounded-lg border border-slate-700/80 bg-slate-900/90 text-slate-200 px-3 py-1.5 pr-8 text-xs font-mono font-medium focus:outline-none focus:border-blue-500 transition-colors cursor-pointer"
+                >
+                  {models.map((m) => (
+                    <option key={m} value={m} className="bg-[#111726] text-slate-200">
+                      {m}
+                    </option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+                  <span className="text-[10px]">▼</span>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onCompare}
+              disabled={compareLoading || !compareText.trim() || !compareModel}
+              className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 text-sm font-medium transition-all shadow-sm shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <GitCompare className="h-4 w-4" />
+              <span>{compareLoading ? "Comparing..." : "Compare"}</span>
+            </button>
+          </div>
+        </div>
+
+        {compareError && (
+          <div className="mt-4 rounded-xl border border-rose-800/80 bg-rose-950/40 p-4 text-sm text-rose-300 flex items-start gap-3">
+            <AlertCircle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <span className="font-semibold">Error: </span>
+              {compareError}
+            </div>
+          </div>
+        )}
+
+        {compareResult && (
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <ComparePanel
+              label="Grounded (with retrieval)"
+              answer={compareResult.grounded.answer}
+              badges={[
+                compareResult.grounded.refused ? "refused" : null,
+                compareResult.grounded.confidence != null
+                  ? `confidence ${(compareResult.grounded.confidence * 100).toFixed(0)}%`
+                  : null,
+              ].filter(Boolean)}
+              timings={[
+                ["total", compareResult.grounded.latency_ms],
+                ["rerank", compareResult.grounded.rerank_ms],
+                ["llm", compareResult.grounded.generate_ms],
+              ]}
+            >
+              <SourceList citations={compareResult.grounded.citations} title="Sources" compact />
+            </ComparePanel>
+            <ComparePanel
+              label="Direct (no retrieval)"
+              answer={compareResult.direct.answer}
+              timings={[
+                ["total", compareResult.direct.latency_ms],
+                compareResult.direct.tokens_per_sec != null
+                  ? ["tok/s", compareResult.direct.tokens_per_sec, ""]
+                  : null,
+              ].filter(Boolean)}
+            />
+          </div>
+        )}
+      </div>
 
       {/* Current Run Card */}
       {job && (
@@ -481,6 +605,39 @@ function RunParams({ params }) {
           {use_cache ? "cache" : "no-cache"}
         </span>
       )}
+    </div>
+  );
+}
+
+function ComparePanel({ label, answer, badges = [], timings = [], children }) {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <span className="text-xs font-semibold text-slate-200">{label}</span>
+        {badges.map((badge) => (
+          <span
+            key={badge}
+            className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-300 border border-amber-800/60"
+          >
+            {badge}
+          </span>
+        ))}
+      </div>
+      <p className="text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">{answer}</p>
+      <div className="flex flex-wrap items-center gap-2 mt-3 text-[11px] font-mono text-slate-400">
+        {timings.map(([tag, value, unit = "ms"]) => (
+          value == null ? null : (
+            <span
+              key={tag}
+              className="flex items-center gap-1 bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-800"
+            >
+              {tag === "total" ? <Clock className="h-3 w-3 text-slate-500" /> : <Zap className="h-3 w-3 text-slate-500" />}
+              {tag} {unit === "ms" ? Math.round(value) : value}{unit}
+            </span>
+          )
+        ))}
+      </div>
+      {children}
     </div>
   );
 }

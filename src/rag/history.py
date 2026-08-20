@@ -32,10 +32,20 @@ query_history = sa.Table(
     sa.Column("query", sa.Text, nullable=False),
     # Null while the row is still pending -- the answer doesn't exist yet.
     sa.Column("answer", sa.Text, nullable=True),
-    # JSONB rather than a join table: sources are read back as a whole list,
+    # JSONB rather than a join table: citations are read back as a whole list,
     # never queried across, and there is no source entity to point at.
+    #
+    # citations supersedes sources. The old column held bare URL strings; the
+    # new one holds objects naming a file and a unit inside it. Rather than
+    # change the shape of a column that existing rows still populate, the new
+    # shape gets its own column and old rows keep rendering from the old one.
     sa.Column("sources", JSONB, nullable=True),
+    sa.Column("citations", JSONB, nullable=True),
     sa.Column("refused", sa.Boolean, nullable=True),
+    # How well the best retrieved chunk matched, 0-1. Recorded but not yet
+    # acted on -- see nodes.confidence_of on why a threshold needs sweeping
+    # before it can gate anything.
+    sa.Column("confidence", sa.Float, nullable=True),
     sa.Column("latency_ms", sa.Float, nullable=True),
     # Breakout of latency_ms: how much of the total went to the cross-encoder
     # vs. waiting on Ollama generation, so a slow query points at which knob
@@ -62,6 +72,8 @@ def _migrate(engine: sa.Engine) -> None:
         "ALTER TABLE query_history ALTER COLUMN refused DROP NOT NULL",
         "ALTER TABLE query_history ADD COLUMN IF NOT EXISTS rerank_ms DOUBLE PRECISION",
         "ALTER TABLE query_history ADD COLUMN IF NOT EXISTS generate_ms DOUBLE PRECISION",
+        "ALTER TABLE query_history ADD COLUMN IF NOT EXISTS citations JSONB",
+        "ALTER TABLE query_history ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION",
     ]
     with engine.begin() as conn:
         for statement in statements:
@@ -105,7 +117,9 @@ def start(query: str, model: str | None = None, connection: str | None = None) -
 def complete(
     entry_id: str,
     answer: str,
-    sources: list[str],
+    citations: list[dict] | None = None,
+    refused: bool = False,
+    confidence: float | None = None,
     latency_ms: float | None = None,
     rerank_ms: float | None = None,
     generate_ms: float | None = None,
@@ -121,9 +135,9 @@ def complete(
                 .where(query_history.c.id == entry_id)
                 .values(
                     answer=answer,
-                    sources=list(sources),
-                    # Answer without sources implies refusal path.
-                    refused=not sources,
+                    citations=list(citations or []),
+                    refused=refused,
+                    confidence=confidence,
                     latency_ms=latency_ms,
                     rerank_ms=rerank_ms,
                     generate_ms=generate_ms,
@@ -149,17 +163,21 @@ def fail(entry_id: str, connection: str | None = None) -> None:
         logger.warning("failed to mark query history as failed", exc_info=True)
 
 
+def _decode(value):
+    """JSONB comes back parsed on Postgres and as text on SQLite."""
+    return json.loads(value) if isinstance(value, str) else value
+
+
 def _row_to_dict(row) -> dict:
-    sources = row.sources
-    if isinstance(sources, str):
-        sources = json.loads(sources)
     return {
         "id": row.id,
         "created_at": row.created_at.isoformat(),
         "query": row.query,
         "answer": row.answer,
-        "sources": sources or [],
+        "sources": _decode(row.sources) or [],
+        "citations": _decode(row.citations) or [],
         "refused": row.refused,
+        "confidence": row.confidence,
         "latency_ms": row.latency_ms,
         "rerank_ms": row.rerank_ms,
         "generate_ms": row.generate_ms,

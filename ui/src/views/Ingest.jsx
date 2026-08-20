@@ -10,7 +10,9 @@ import {
   AlertCircle,
   Clock,
   Sparkles,
+  Eye,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import Card from "../components/Card.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 import {
@@ -388,6 +390,14 @@ export default function Ingest() {
 
                     {isMenuOpen && (
                       <div className="absolute right-0 top-full mt-1 z-20 w-44 rounded-xl border border-slate-700/80 bg-[#151c2d] p-1 shadow-xl text-xs">
+                        <Link
+                          to={`/documents/${entry.id}`}
+                          onClick={() => setOpenMenuId(null)}
+                          className="flex items-center gap-2 w-full px-2.5 py-1.5 rounded-lg text-left text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+                        >
+                          <Eye className="h-3.5 w-3.5 text-slate-400" />
+                          <span>View document</span>
+                        </Link>
                         <button
                           type="button"
                           onClick={() => {

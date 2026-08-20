@@ -59,48 +59,6 @@ const DEFAULT_MODEL_METADATA = {
     context: "128k ctx",
     description: "Microsoft compact reasoning model with high benchmark performance.",
   },
-  "nomic-embed-text": {
-    min_vram: "500 MB",
-    disk_size: "~274 MB",
-    params: "137M",
-    context: "8192 ctx • 768 dim",
-    description: "Default embedding model for vectorstore retrieval with large context window.",
-  },
-  "all-minilm": {
-    min_vram: "250 MB",
-    disk_size: "~120 MB",
-    params: "33M",
-    context: "256 ctx • 384 dim",
-    description: "Extremely fast, lightweight sentence embeddings.",
-  },
-  "bge-m3": {
-    min_vram: "1.5 GB",
-    disk_size: "~1.2 GB",
-    params: "568M",
-    context: "8192 ctx • 1024 dim",
-    description: "Multilingual embeddings supporting dense, sparse, and multi-vector search.",
-  },
-  "bge-small": {
-    min_vram: "200 MB",
-    disk_size: "~67 MB",
-    params: "24M",
-    context: "512 ctx • 384 dim",
-    description: "Minimal memory footprint embedding model for resource-constrained setups.",
-  },
-  "mxbai-embed-large": {
-    min_vram: "1.0 GB",
-    disk_size: "~670 MB",
-    params: "335M",
-    context: "512 ctx • 1024 dim",
-    description: "High retrieval accuracy representation model for English corpus.",
-  },
-  "snowflake-arctic-embed": {
-    min_vram: "1.0 GB",
-    disk_size: "~669 MB",
-    params: "335M",
-    context: "512 ctx • 1024 dim",
-    description: "Enterprise-grade retrieval embedding model by Snowflake.",
-  },
   "cross-encoder/ms-marco-MiniLM-L-6-v2": {
     min_vram: "300 MB",
     disk_size: "~80 MB",
@@ -156,8 +114,8 @@ const DEFAULT_RERANK_CATALOG = [
 
 const TABS = [
   { key: "chat", label: "Chat Models", icon: Cpu },
-  { key: "embed", label: "Embeddings", icon: Database },
   { key: "rerank", label: "Rerankers", icon: Layers },
+  { key: "embed", label: "Embeddings", icon: Database },
 ];
 
 export default function Settings() {
@@ -241,15 +199,6 @@ export default function Settings() {
       subtitle: "Downloaded models are instantly available in Ask and Benchmark views",
       rows: data?.catalog.map((m) => ({ name: m, installed: data.installed.includes(m) })),
     },
-    embed: {
-      title: "Vector Embedding Models",
-      subtitle: data ? `Active vector embedding model: ${data.active_embed_model || "nomic-embed-text"}` : "Downloadable models for vectorizing document chunks",
-      rows: data?.embed_models.map((m) => ({
-        name: m,
-        installed: data.embed_installed.includes(m),
-        active: (data.active_embed_model || "nomic-embed-text") === m,
-      })),
-    },
     rerank: {
       title: "Cross-Encoder Reranker Models",
       subtitle: data ? `Status: ${data.rerank_enabled ? "Enabled" : "Disabled"} (Active model: ${data.active_rerank_model || data.rerank_model})` : "Pre-download cross-encoder models from HuggingFace to cache locally",
@@ -304,21 +253,25 @@ export default function Settings() {
         })}
       </div>
 
-      {currentTab && (
-        <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
-          <div className="mb-4 pb-3 border-b border-slate-800/80">
-            <h2 className="text-base font-bold text-slate-100">{currentTab.title}</h2>
-            <p className="text-xs text-slate-400 mt-0.5">{currentTab.subtitle}</p>
+      {activeTab === "embed" ? (
+        <EmbedInfoPanel model={data?.active_embed_model || "nomic-embed-text"} info={infoMap[data?.active_embed_model || "nomic-embed-text"]} />
+      ) : (
+        currentTab && (
+          <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
+            <div className="mb-4 pb-3 border-b border-slate-800/80">
+              <h2 className="text-base font-bold text-slate-100">{currentTab.title}</h2>
+              <p className="text-xs text-slate-400 mt-0.5">{currentTab.subtitle}</p>
+            </div>
+            <ModelTable
+              rows={currentTab.rows}
+              infoMap={infoMap}
+              job={(m) => jobs[m]}
+              onDownload={download}
+              onDeleteRequest={(row, info) => setModelToDelete({ name: row.name, active: row.active, info })}
+              deletingModel={deletingModel}
+            />
           </div>
-          <ModelTable
-            rows={currentTab.rows}
-            infoMap={infoMap}
-            job={(m) => jobs[m]}
-            onDownload={download}
-            onDeleteRequest={(row, info) => setModelToDelete({ name: row.name, active: row.active, info })}
-            deletingModel={deletingModel}
-          />
-        </div>
+        )
       )}
 
       {/* Delete Confirmation Warning Modal */}
@@ -394,6 +347,49 @@ export default function Settings() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmbedInfoPanel({ model, info }) {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
+      <div className="mb-4 pb-3 border-b border-slate-800/80">
+        <h2 className="text-base font-bold text-slate-100">Vector Embedding Model</h2>
+        <p className="text-xs text-slate-400 mt-0.5">
+          Set once via <code className="font-mono text-slate-300">RAG_EMBED_MODEL</code> and fixed for the
+          life of the collection -- every stored chunk was embedded with it, so switching models here isn't
+          offered: it would mix incompatible vector dimensions in the same vectorstore and corrupt
+          similarity search. Changing it requires re-ingesting everything.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-sm font-bold text-slate-100">{model}</span>
+        {info?.min_vram && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-blue-950/60 text-blue-300 border border-blue-800/60">
+            <Zap className="h-3 w-3" />
+            {info.min_vram}
+          </span>
+        )}
+        {info?.disk_size && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono text-slate-400 bg-slate-900/80 border border-slate-800">
+            <HardDrive className="h-3 w-3 text-slate-500" />
+            {info.disk_size}
+          </span>
+        )}
+        {info?.params && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono text-slate-400 bg-slate-900/80 border border-slate-800">
+            {info.params}
+          </span>
+        )}
+      </div>
+      {(info?.context || info?.description) && (
+        <div className="mt-1 text-xs text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          {info?.context && <span className="font-mono text-slate-300">{info.context}</span>}
+          {info?.context && info?.description && <span className="text-slate-600">•</span>}
+          {info?.description && <span>{info.description}</span>}
         </div>
       )}
     </div>

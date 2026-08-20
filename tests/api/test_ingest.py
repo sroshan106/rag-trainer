@@ -89,11 +89,18 @@ def stub_delete_chunks(monkeypatch):
 
 @pytest.fixture
 def stub_ingest(monkeypatch):
-    """Replace the real pipeline; returns the list of paths it was called with."""
+    """Replace the real pipeline; returns the list of calls it received."""
     calls = []
 
-    def fake(path, progress=None, splitter=None):
-        calls.append(str(path))
+    def fake(path, progress=None, splitter=None, file_id=None, filename=None):
+        calls.append(
+            {
+                "path": str(path),
+                "splitter": splitter,
+                "file_id": file_id,
+                "filename": filename,
+            }
+        )
         if progress:
             progress(1.0, "done")
         return {
@@ -102,6 +109,8 @@ def stub_ingest(monkeypatch):
             "chunks": 1,
             "chunk_ids": ["chunk-1"],
             "splitter": splitter,
+            "file_id": file_id,
+            "filename": filename,
             "index_built": False,
         }
 
@@ -127,7 +136,7 @@ def test_upload_ingests_the_uploaded_file(client, stub_ingest, file_store, tmp_p
     assert response.status_code == 202
     _wait_idle()
     assert len(stub_ingest) == 1
-    assert stub_ingest[0].endswith("mine.csv")
+    assert stub_ingest[0]["path"].endswith("mine.csv")
 
 
 def test_upload_records_the_file_and_its_hash(client, stub_ingest, file_store):
@@ -163,15 +172,29 @@ def test_duplicate_upload_does_not_leave_a_second_copy_on_disk(client, stub_inge
     assert len(list(ingest_route.UPLOAD_DIR.glob("*"))) == 1
 
 
-def test_upload_rejects_a_csv_without_a_text_column(client, stub_ingest, file_store):
+def test_upload_accepts_a_csv_with_arbitrary_columns(client, stub_ingest, file_store):
+    """No schema is imposed: the whole row is embedded, whatever it is called."""
     response = client.post(
         "/api/ingest/upload",
-        files={"file": ("bad.csv", "index,source_url\n1,http://x\n", "text/csv")},
+        files={"file": ("bioasq.csv", "passage,id\nsome text,9797\n", "text/csv")},
     )
 
-    assert response.status_code == 422
-    assert "text" in response.json()["detail"]
-    assert stub_ingest == []
+    assert response.status_code == 202
+    _wait_idle()
+    assert len(stub_ingest) == 1
+
+
+def test_upload_passes_the_original_filename_through_for_citations(
+    client, stub_ingest, file_store
+):
+    client.post("/api/ingest/upload", files={"file": ("mine.csv", CSV, "text/csv")})
+    _wait_idle()
+
+    # The stored copy is uuid-prefixed, so the original name has to be carried
+    # separately or a citation would name a file the user never saw.
+    assert stub_ingest[0]["filename"] == "mine.csv"
+    assert stub_ingest[0]["file_id"] is not None
+    assert "mine.csv" not in Path(stub_ingest[0]["path"]).name.split("-")[0]
 
 
 def test_upload_rejects_unsupported_extension(client, stub_ingest, file_store):
@@ -199,7 +222,7 @@ def test_uploaded_filename_cannot_escape_the_upload_directory(client, stub_inges
 
     assert response.status_code == 202
     _wait_idle()
-    stored = Path(stub_ingest[0]).resolve()
+    stored = Path(stub_ingest[0]["path"]).resolve()
     assert stored.parent == ingest_route.UPLOAD_DIR.resolve()
     assert stored.exists()
 
@@ -287,7 +310,12 @@ def test_delete_unknown_file_is_a_404(client, file_store, stub_delete_chunks):
 def test_delete_refused_while_an_ingest_is_running(client, monkeypatch, file_store, stub_delete_chunks):
     release = threading.Event()
     monkeypatch.setattr(
-        ingest_route, "ingest", lambda path, progress=None, splitter=None: (release.wait(5), {"path": path})[1]
+        ingest_route,
+        "ingest",
+        lambda path, progress=None, splitter=None, file_id=None, filename=None: (
+            release.wait(5),
+            {"path": path},
+        )[1],
     )
     file_store["h"] = {
         "id": "1",
@@ -313,7 +341,7 @@ def test_delete_refused_while_an_ingest_is_running(client, monkeypatch, file_sto
 def test_second_upload_is_refused_while_one_runs(client, monkeypatch, file_store):
     release = threading.Event()
 
-    def blocking(path, progress=None, splitter=None):
+    def blocking(path, progress=None, splitter=None, file_id=None, filename=None):
         release.wait(5)
         return {"path": path, "documents": 0, "chunks": 0, "index_built": False}
 
@@ -334,7 +362,10 @@ def test_active_reports_the_running_job_then_nothing(client, monkeypatch, file_s
     monkeypatch.setattr(
         ingest_route,
         "ingest",
-        lambda path, progress=None, splitter=None: (release.wait(5), {"path": path})[1],
+        lambda path, progress=None, splitter=None, file_id=None, filename=None: (
+            release.wait(5),
+            {"path": path},
+        )[1],
     )
 
     started = client.post(

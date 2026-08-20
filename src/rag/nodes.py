@@ -2,12 +2,13 @@
 
 import os
 import threading
+import time
 
 from langchain_ollama import ChatOllama
 
 from src.config import env_flag
 from src.observability import tracing
-from src.rag.citations import citations_enabled, collect_sources
+from src.rag.citations import citations_enabled, collect_citations
 from src.rag.prompts import RAG_PROMPT, format_context
 from src.vectorstore import hybrid, rerank
 from src.vectorstore.store import load_vectorstore
@@ -46,6 +47,34 @@ RELEVANCE_RATIO = float(os.environ.get("RAG_RELEVANCE_RATIO", "0.9"))
 
 SCORE_KEY = hybrid.DENSE_SCORE_KEY
 LEXICAL_KEY = hybrid.LEXICAL_SCORE_KEY
+
+
+def confidence_of(docs: list) -> float:
+    """How well the best surviving chunk matches the query, on 0-1.
+
+    The cross-encoder score is preferred when reranking ran: it is the only
+    signal that reads query and chunk together, and rerank.py already squashes
+    it onto the same 0-1 footing as the cosine. Dense relevance is the fallback
+    when RAG_RERANK is off; a lexical-only hit has no comparable score of its
+    own and contributes nothing here.
+
+    Top-1 rather than a mean: one strongly relevant chunk is enough to answer
+    from, and averaging would punish a correct answer that happens to be
+    accompanied by four mediocre neighbours.
+
+    Note the scale is monotonic but not calibrated -- a cross-encoder's 0.8 is
+    not "80% likely relevant". Thresholding on this needs a swept value, not a
+    guessed one.
+    """
+    scores = [
+        score
+        for doc in docs
+        for score in (
+            doc.metadata.get(rerank.RERANK_SCORE_KEY) or doc.metadata.get(SCORE_KEY),
+        )
+        if score is not None
+    ]
+    return round(max(scores), 4) if scores else 0.0
 
 
 def hybrid_enabled() -> bool:
@@ -134,7 +163,9 @@ def retrieve_node(state: dict) -> dict:
             for d in docs
         ],
         lexical_hits=sum(1 for d in docs if LEXICAL_KEY in d.metadata),
-        sources=[d.metadata.get("source") for d in docs],
+        units=[
+            f"{d.metadata.get('filename')}:{d.metadata.get('unit_index')}" for d in docs
+        ],
     )
     return {"retrieved_docs": docs}
 
@@ -225,8 +256,11 @@ class _ThinkFilter:
 
 
 def _refusal() -> dict:
-    tracing.detail(refused=True)
-    return {"answer": REFUSAL_ANSWER, "sources": []}
+    tracing.detail(refused=True, confidence=0.0)
+    # refused is carried explicitly rather than inferred from an empty citation
+    # list: the two stopped being the same thing once chunks could be retrieved
+    # without usable provenance.
+    return {"answer": REFUSAL_ANSWER, "citations": [], "refused": True, "confidence": 0.0}
 
 
 def _prompt_for(state: dict) -> tuple[str, str]:
@@ -247,15 +281,40 @@ def generate_node(state: dict) -> dict:
     model, prompt = _prompt_for(state)
     response = _get_llm(model).invoke(prompt)
     answer = _strip_thinking(response.content)
-    sources = collect_sources(state["graded_docs"]) if citations_enabled() else []
+    citations = collect_citations(state["graded_docs"]) if citations_enabled() else []
+    confidence = confidence_of(state["graded_docs"])
     tracing.detail(
         refused=False,
+        confidence=confidence,
         model=model,
         prompt_chars=len(prompt),
         docs=len(state["graded_docs"]),
         **_token_usage(response),
     )
-    return {"answer": answer, "sources": sources}
+    return {
+        "answer": answer,
+        "citations": citations,
+        "refused": False,
+        "confidence": confidence,
+    }
+
+
+def direct_answer(model: str, query: str) -> dict:
+    """Answer ``query`` with no retrieval step: the raw model against the raw
+    question, same generation settings as the RAG path (temperature, num_ctx,
+    thinking suppression) so timing and output are comparable apples-to-apples.
+    Used to show what retrieval/grounding actually changes, not to serve
+    queries -- callers must not treat this as a substitute for ``generate_node``.
+    """
+    prompt = query + _NO_THINK_SUFFIX if _wants_no_think(model) else query
+    started = time.perf_counter()
+    response = _get_llm(model).invoke(prompt)
+    generate_ms = round((time.perf_counter() - started) * 1000, 1)
+    return {
+        "answer": _strip_thinking(response.content),
+        "generate_ms": generate_ms,
+        **_token_usage(response),
+    }
 
 
 def generate_stream(state: dict):
@@ -284,9 +343,11 @@ def generate_stream(state: dict):
                 yield visible
 
         answer = "".join(parts).strip()
-        sources = collect_sources(state["graded_docs"]) if citations_enabled() else []
+        citations = collect_citations(state["graded_docs"]) if citations_enabled() else []
+        confidence = confidence_of(state["graded_docs"])
         tracing.detail(
             refused=False,
+            confidence=confidence,
             model=model,
             prompt_chars=len(prompt),
             docs=len(state["graded_docs"]),
@@ -294,7 +355,12 @@ def generate_stream(state: dict):
             # Ollama reports counts on the final chunk of a stream.
             **_token_usage(last),
         )
-        return {"answer": answer, "sources": sources}
+        return {
+            "answer": answer,
+            "citations": citations,
+            "refused": False,
+            "confidence": confidence,
+        }
 
 
 def _token_usage(response) -> dict:

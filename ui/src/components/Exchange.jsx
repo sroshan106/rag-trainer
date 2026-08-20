@@ -139,11 +139,11 @@ export default function Exchange({
       {entry.refused && (
         <div className="mt-3 flex items-center gap-2 p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400">
           <AlertTriangle className="h-4 w-4 text-slate-500 shrink-0" />
-          <span>No sources survived grading — knowledge base does not cover this question.</span>
+          <span>No chunk cleared the relevance grader — the knowledge base does not cover this question.</span>
         </div>
       )}
 
-      <SourceList sources={entry.sources} />
+      <SourceList citations={entry.citations} sources={entry.sources} />
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800/80 pt-3 text-xs">
         <Timing entry={entry} />

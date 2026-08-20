@@ -12,11 +12,29 @@ from src.db import engine as db_engine
 from src.rag import history
 
 
-def record(query, answer, sources, latency_ms=None, model=None):
+def record(query, answer, citations=(), refused=False, latency_ms=None, model=None,
+           confidence=None):
     """Test helper: start + complete in one call, mirroring the old one-shot record()."""
     entry_id = history.start(query, model=model)
-    history.complete(entry_id, answer, sources, latency_ms=latency_ms)
+    history.complete(
+        entry_id,
+        answer,
+        citations=list(citations),
+        refused=refused,
+        confidence=confidence,
+        latency_ms=latency_ms,
+    )
     return entry_id
+
+
+CITATION = {
+    "file_id": "file-1",
+    "filename": "corpus.csv",
+    "unit_kind": "row",
+    "unit_index": 42,
+    "label": "row 42",
+    "url": None,
+}
 
 
 @pytest.fixture
@@ -26,36 +44,51 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setattr(db_engine, "_engines", {})
     monkeypatch.setattr(db_engine, "_initialized", set())
     # JSONB is Postgres-only; the column type is swapped for the SQLite run.
-    monkeypatch.setattr(
-        history.query_history.c.sources, "type", sa.JSON(), raising=False
-    )
+    for column in (history.query_history.c.sources, history.query_history.c.citations):
+        monkeypatch.setattr(column, "type", sa.JSON(), raising=False)
     monkeypatch.setenv("DATABASE_URL", url)
     return url
 
 
 def test_record_then_read_back(db):
     entry_id = record(
-        "who said it?", "Ruby did.", ["http://example.com/a"], latency_ms=12.5, model="m"
+        "who said it?", "Ruby did.", [CITATION], latency_ms=12.5, model="m",
+        confidence=0.82,
     )
 
     entry = history.get(entry_id)
     assert entry["query"] == "who said it?"
     assert entry["answer"] == "Ruby did."
-    assert entry["sources"] == ["http://example.com/a"]
+    assert entry["citations"] == [CITATION]
     assert entry["refused"] is False
+    assert entry["confidence"] == 0.82
     assert entry["latency_ms"] == 12.5
     assert entry["model"] == "m"
 
 
-def test_an_answer_without_sources_is_marked_refused(db):
-    entry_id = record("off topic?", "I don't have enough context.", [])
+def test_refusal_is_recorded_from_the_flag_not_inferred_from_citations(db):
+    """A refusal is what the graph decided, not what the citation list looks like."""
+    entry_id = record("off topic?", "I don't have enough context.", [], refused=True)
 
     assert history.get(entry_id)["refused"] is True
 
 
+def test_an_answer_with_no_citable_chunks_is_not_a_refusal(db):
+    """Chunks predating provenance ground an answer but cannot be cited.
+
+    Under the old rule -- refused = not sources -- this row was mislabelled a
+    refusal despite the model having answered from real context.
+    """
+    entry_id = record("who said it?", "Ruby did.", [], refused=False, confidence=0.7)
+
+    entry = history.get(entry_id)
+    assert entry["refused"] is False
+    assert entry["citations"] == []
+
+
 def test_recent_returns_newest_first_and_respects_limit(db):
     for i in range(4):
-        record(f"q{i}", "a", [])
+        record(f"q{i}", "a")
 
     recent = history.recent(limit=2)
 
