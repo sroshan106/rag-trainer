@@ -35,6 +35,7 @@ export default function Ask() {
   const [historyError, setHistoryError] = useState(null);
   const [models, setModels] = useState([]);
   const [model, setModel] = useState("");
+  const [modelsLoaded, setModelsLoaded] = useState(false);
   const [collection, setCollection] = useState(null);
 
   const inputRef = useRef(null);
@@ -58,9 +59,12 @@ export default function Ask() {
     queryModels().then(({ models: available }) => {
       if (ignore) return;
       setModels(available);
+      setModelsLoaded(true);
       const saved = localStorage.getItem(MODEL_STORAGE_KEY);
       setModel(saved && available.includes(saved) ? saved : available[0] || "");
-    }).catch(() => {});
+    }).catch(() => {
+      if (!ignore) setModelsLoaded(true);
+    });
     collectionStatus().then((s) => {
       if (!ignore) setCollection(s);
     }).catch(() => {});

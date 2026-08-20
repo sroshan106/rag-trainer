@@ -174,9 +174,9 @@ def test_upload_rejects_a_csv_without_a_text_column(client, stub_ingest, file_st
     assert stub_ingest == []
 
 
-def test_upload_rejects_non_csv(client, stub_ingest, file_store):
+def test_upload_rejects_unsupported_extension(client, stub_ingest, file_store):
     response = client.post(
-        "/api/ingest/upload", files={"file": ("notes.txt", "hello", "text/plain")}
+        "/api/ingest/upload", files={"file": ("notes.docx", "hello", "text/plain")}
     )
 
     assert response.status_code == 415

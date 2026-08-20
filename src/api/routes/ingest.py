@@ -1,6 +1,7 @@
 """Routes for adding documents to the system."""
 
 import hashlib
+import json
 import uuid
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from src.api.schemas import IngestFileEntry, JobResponse
 from src.ingestion import files as file_history
-from src.ingestion.loaders import UnusableCSV, load_documents
+from src.ingestion.loaders import SUPPORTED_EXTENSIONS, UnsupportedFileType, UnusableCSV, load_documents
 from src.ingestion.pipeline import ingest
 from src.ingestion.splitter import DEFAULT_SPLITTER, SPLITTERS
 from src.jobs.runner import JobAlreadyRunning, ProgressReporter, runner
@@ -63,9 +64,12 @@ def upload_and_ingest(
             status_code=422,
             detail=f"unknown splitter {splitter!r} -- choose from {list(SPLITTERS)}",
         )
-    original = Path(file.filename or "upload.csv").name
-    if not original.lower().endswith(".csv"):
-        raise HTTPException(status_code=415, detail="only .csv files are supported")
+    original = Path(file.filename or "upload").name
+    if Path(original).suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=415,
+            detail=f"unsupported file type -- expected one of: {', '.join(sorted(SUPPORTED_EXTENSIONS))}",
+        )
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     target = UPLOAD_DIR / f"{uuid.uuid4().hex}-{original}"
@@ -96,16 +100,16 @@ def upload_and_ingest(
 
     try:
         documents = len(load_documents(target))
-    except UnusableCSV as exc:
+    except (UnusableCSV, UnsupportedFileType) as exc:
         target.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except (UnicodeDecodeError, OSError) as exc:
+    except (UnicodeDecodeError, OSError, json.JSONDecodeError) as exc:
         target.unlink(missing_ok=True)
-        raise HTTPException(status_code=422, detail=f"could not read the CSV: {exc}") from exc
+        raise HTTPException(status_code=422, detail=f"could not read the file: {exc}") from exc
 
     if documents == 0:
         target.unlink(missing_ok=True)
-        raise HTTPException(status_code=422, detail="the CSV has no rows with text")
+        raise HTTPException(status_code=422, detail="the file has no usable text")
 
     record_id = file_history.record(
         filename=original,

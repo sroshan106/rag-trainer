@@ -23,6 +23,7 @@ import {
 } from "../api.js";
 
 const BUSY_STATUSES = ["pending", "running"];
+const ACCEPTED_EXTENSIONS = [".csv", ".txt", ".md", ".json", ".jsonl", ".pdf"];
 
 function formatBytes(bytes) {
   if (!bytes) return "0 B";
@@ -142,10 +143,11 @@ export default function Ingest() {
     setIsDragging(false);
     if (busy) return;
     const dropped = e.dataTransfer.files?.[0];
-    if (dropped?.name.endsWith(".csv")) {
+    const ext = dropped ? `.${dropped.name.split(".").pop().toLowerCase()}` : "";
+    if (dropped && ACCEPTED_EXTENSIONS.includes(ext)) {
       setFile(dropped);
     } else {
-      setError("Please drop a valid .csv file");
+      setError(`Please drop a supported file (${ACCEPTED_EXTENSIONS.join(", ")})`);
     }
   }
 
@@ -201,7 +203,7 @@ export default function Ingest() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,text/csv"
+            accept={ACCEPTED_EXTENSIONS.join(",")}
             disabled={busy}
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
             className="hidden"
@@ -213,7 +215,9 @@ export default function Ingest() {
             {file ? file.name : "Drop files here or click to browse"}
           </p>
           <p className="text-xs text-slate-500 mt-1">
-            {file ? `${formatBytes(file.size)} • Ready to ingest` : "CSV files up to 50MB"}
+            {file
+              ? `${formatBytes(file.size)} • Ready to ingest`
+              : `CSV, TXT, MD, JSON, JSONL, PDF up to 50MB`}
           </p>
 
           <button
@@ -336,7 +340,7 @@ export default function Ingest() {
         {/* Document List */}
         {filteredHistory.length === 0 ? (
           <div className="py-12 text-center text-slate-500 text-xs">
-            {searchQuery ? "No matching documents found." : "No documents ingested yet. Upload a CSV above to start."}
+            {searchQuery ? "No matching documents found." : "No documents ingested yet. Upload a file above to start."}
           </div>
         ) : (
           <div className="flex flex-col gap-2.5">
