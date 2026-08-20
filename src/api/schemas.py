@@ -67,6 +67,21 @@ class BenchmarkRequest(BaseModel):
     # Omitted means the pipeline default; the route validates it against
     # AVAILABLE_MODELS rather than trusting whatever string arrives.
     model: str | None = None
+    # Optional list of test file IDs, names, or paths to benchmark. If omitted or empty,
+    # defaults to the standard built-in benchmark suites.
+    test_files: list[str] | None = None
+
+
+class BenchmarkTestFileEntry(BaseModel):
+    id: str
+    name: str
+    filename: str
+    builtin: bool = False
+    questions: int
+    suite_type: str
+    created_at: str | None = None
+    size_bytes: int | None = None
+
 
 
 class PullModelRequest(BaseModel):

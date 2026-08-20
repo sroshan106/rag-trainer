@@ -112,15 +112,32 @@ export function startBenchmark({
   use_cache = true,
   chunk_size = 10,
   model = null,
+  test_files = null,
 } = {}) {
   return request("/benchmark", {
     method: "POST",
-    body: JSON.stringify({ workers, sample, use_cache, chunk_size, model }),
+    body: JSON.stringify({ workers, sample, use_cache, chunk_size, model, test_files }),
   });
 }
 
 export function benchmarkModels() {
   return request("/benchmark/models");
+}
+
+export function getBenchmarkTestFiles() {
+  return request("/benchmark/test-files");
+}
+
+export async function uploadBenchmarkTestFile(file) {
+  const body = new FormData();
+  body.append("file", file);
+  const res = await fetch(`${BASE}/benchmark/test-files/upload`, { method: "POST", body });
+  if (!res.ok) throw await errorFrom(res);
+  return res.json();
+}
+
+export function deleteBenchmarkTestFile(id) {
+  return request(`/benchmark/test-files/${id}`, { method: "DELETE" });
 }
 
 export function benchmarkHistory() {

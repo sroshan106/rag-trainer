@@ -1,3 +1,113 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+`rag-trainer` — local-only retrieval-augmented generation system. Postgres/pgvector stores
+chunks + embeddings, Ollama serves both the embedding and chat models, FastAPI wires it together
+behind a React dashboard. No data leaves the host. Tuned for a 4GB GTX 1050 — defaults assume
+real VRAM pressure, not abundance.
+
+Read `ARCHITECTURE.md` before changing code — it has the layer diagram, query-flow and
+ingest-flow mermaid diagrams, and a "where new code goes" table. Read `explainer.md` for RAG
+concepts, `plan.md` for locked decisions and benchmark baselines.
+
+## Commands
+
+```bash
+# Run stack
+cp .env.example .env
+docker compose up -d                                          # postgres+pgvector, ollama, api, ui
+docker compose exec app python -m src.ingestion.pipeline data/uploads/your.csv
+
+# Without Docker
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn src.api.app:app --reload        # API on :8000
+cd ui && npm install && npm run dev     # dashboard on :5173
+
+# Tests
+pytest                                       # unit tests only (RAG_INTEGRATION unset skips integration marker)
+RAG_INTEGRATION=1 pytest -m integration      # also hits live Postgres + Ollama
+pytest tests/rag/test_graph.py               # single file
+pytest tests/rag/test_graph.py::test_name    # single test
+
+# UI
+cd ui && npm run lint       # oxlint
+cd ui && npm run build      # vite build
+```
+
+A chat model must be pulled before the first query — there is deliberately no default model
+(`ollama pull llama3.2:3b`, or use the Settings view).
+
+## Architecture — the four layers
+
+Arrows only point downward: `src/vectorstore` never imports `src/rag`; `src/rag` never imports
+`src/api`. Need something from a layer above? Pass it in as an argument instead of importing up.
+
+- **Interface** — `ui/` (React dashboard: Ask, Ingest, Benchmark, System, Settings), CLI
+  entrypoints (`src.rag.graph`, `src.ingestion.pipeline`)
+- **HTTP** — `src/api` (routers + Pydantic schemas, HTTP mapping only — no orchestration logic),
+  `src/jobs` (thread-per-job background runner with cooperative cancel)
+- **Domain** — `src/rag` (graph, nodes, prompts, citations, history, model catalog),
+  `src/ingestion` (loaders, splitter, pipeline, file provenance)
+- **Infrastructure** — `src/vectorstore` (pgvector, lexical search, hybrid RRF fusion,
+  cross-encoder reranker), `src/observability` (tracing spans, JSON logging, host/GPU metrics),
+  `src/config.py` (env access)
+
+### Query path
+
+`ask()` / `ask_stream()` in `src/rag/graph.py` walk three nodes: retrieve → grade → generate.
+
+- Retrieve (`src/rag/nodes.py`): dense k-NN (pgvector, `FETCH_K=20`) optionally fused via RRF
+  (`src/vectorstore/hybrid.py`) with lexical tsvector search, optionally reranked by a
+  cross-encoder (`ms-marco-MiniLM-L-6-v2`, CPU), cut to `RETRIEVE_K=5`.
+- Grade: drops chunks below `RELEVANCE_FLOOR=0.56` or below `RELEVANCE_RATIO=0.9` of the best
+  score. If nothing survives, the answer is a hardcoded refusal — never a guess.
+- Generate: prompt template + surviving chunks → ChatOllama. `qwen3*` models get their `<think>`
+  block stripped and `/no_think` appended. **Citations are computed deterministically in
+  `src/rag/citations.py` from the surviving chunks — never asked of the LLM**, since small local
+  models don't reliably follow inline-citation instructions.
+- No retry edge: retrieval is deterministic, so re-running the same query can't surface a chunk
+  that clears the grader when the top results didn't.
+
+### Ingest path
+
+`POST /api/ingest` → hash while streaming to disk → dedup by hash (409 if already ingested) →
+CSV parse (422 `UnusableCSV` if unusable) → provenance row via `files.record()` →
+`runner.submit()` background job → `load_documents` (`src/ingestion/loaders.py`) →
+`split_documents` (1000 chars, 150 overlap) → `build_vectorstore` (embed via Ollama, write to
+pgvector) → `ensure_index` (tsvector column + GIN index).
+
+**Invariant: the embedding model used at ingest must match the one used at query time.** A
+mismatch does not raise — it silently returns garbage neighbours. Treat the embedding model as
+baked into the index, not a runtime setting.
+
+### Configuration has three different lifetimes — don't conflate them
+
+| Lifetime | Examples | Changing it means |
+|---|---|---|
+| Baked into the index | chunk size, chunk overlap, embedding model | Re-ingesting the entire corpus |
+| Live per query | `k`, relevance floor/ratio, chat model, citations on/off | Takes effect next query |
+| Server-owned | `DATABASE_URL`, `OLLAMA_BASE_URL` | Restart; never exposed to the browser |
+
+### Where new code goes
+
+| Adding… | Goes in… |
+|---|---|
+| A new document format | `src/ingestion/loaders.py` |
+| A new chunking strategy | `src/ingestion/splitter.py` (register in `SPLITTERS`) |
+| A new retrieval signal | `src/vectorstore/`, fused in `hybrid.py` |
+| A change to how answers are produced | `src/rag/nodes.py` + `src/rag/prompts.py` |
+| A new endpoint | Router in `src/api/routes/`, schema in `src/api/schemas.py` |
+| Anything long-running | A job kind on `src/jobs/runner.py`, never inline in a route |
+| A new dashboard screen | `ui/src/views/`, wired into `ui/src/App.jsx` |
+
+A route function should read as HTTP mapping only: parse, call one domain function, translate
+errors to status codes. If a route body starts orchestrating storage, the logic escaped its
+layer.
+
 <!-- rtk-instructions v2 -->
 # RTK (Rust Token Killer) - Token-Optimized Commands
 

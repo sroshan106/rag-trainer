@@ -1,4 +1,4 @@
-"""Phase 8: benchmark eval against tests/benchmark/data/*.csv.
+"""Phase 8: benchmark eval against tests/benchmark/data/*.csv or custom test files.
 
 Runs the live graph (needs db + ollama up, vectorstore ingested) and
 compares actual retrieval/answers against the labeled question sets.
@@ -14,11 +14,15 @@ The suites are interleaved in chunks rather than run one after another: a
 sequential pass leaves the last suite's metrics undefined until the whole run
 is nearly over, which makes a partial run useless for judging a config change.
 Round-robin chunks of CHUNK_SIZE keep every suite's numbers advancing together,
-so stopping early still leaves three comparable (if noisier) metrics.
+so stopping early still leaves comparable (if noisier) metrics.
+
+Supports modular custom test sets and datasets uploaded by the user or specified
+via CLI/API.
 
 Run: python -m tests.benchmark.run_benchmark [--workers N] [--sample N]
                                              [--chunk-size N] [--model NAME]
-                                             [--no-cache]
+                                             [--no-cache] [--test-file PATH]
+                                             [--test-dir DIR]
 """
 
 import argparse
@@ -38,7 +42,7 @@ from tests.benchmark.cache import CACHE_DIR, ResultCache, config_fingerprint
 DATA_DIR = Path(__file__).parent / "data"
 
 # Questions taken from each suite per round before moving to the next suite.
-# Small enough that all three suites report numbers within the first minute of
+# Small enough that all suites report numbers within the first minute of
 # a run; large enough that the ThreadPoolExecutor is not rebuilt every couple
 # of questions.
 CHUNK_SIZE = 10
@@ -86,9 +90,73 @@ def _answer_overlap(expected: str, actual: str) -> float:
     return len(exp_kw & act_kw) / len(exp_kw)
 
 
-def _load_csv(name: str, sample: int | None = None) -> list[dict]:
-    with open(DATA_DIR / name, newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
+def _normalize_csv_row(row: dict) -> dict | None:
+    """Extract standard question, answer, and document_index from a CSV row."""
+    clean_row = {k.strip().lower(): v for k, v in row.items() if k is not None}
+
+    # Question column aliases
+    question = None
+    for key in ("question", "query", "prompt", "q", "question_text"):
+        if key in clean_row and clean_row[key] and clean_row[key].strip():
+            question = clean_row[key].strip()
+            break
+
+    if not question:
+        return None
+
+    # Answer column aliases
+    answer = None
+    for key in ("answer", "ground_truth", "reference", "expected", "target", "a", "expected_answer"):
+        if key in clean_row and clean_row[key] is not None:
+            answer = clean_row[key].strip()
+            break
+
+    # Document index column aliases
+    doc_index = None
+    for key in ("document_index", "doc_index", "doc_id", "index", "document_id"):
+        if key in clean_row and clean_row[key] is not None and clean_row[key].strip() != "":
+            doc_index = clean_row[key].strip()
+            break
+
+    res = {"question": question}
+    if answer is not None:
+        res["answer"] = answer
+    if doc_index is not None:
+        res["document_index"] = doc_index
+    return res
+
+
+def _resolve_csv_path(path_or_name: str | Path) -> Path:
+    p = Path(path_or_name)
+    if p.is_file():
+        return p
+    if (DATA_DIR / p).is_file():
+        return DATA_DIR / p
+    # Check uploads directory if available
+    upload_p = Path("data/benchmark_uploads") / p
+    if upload_p.is_file():
+        return upload_p
+    try:
+        from src.benchmark.files import resolve_test_file_path
+        return resolve_test_file_path(str(path_or_name))
+    except Exception:
+        pass
+    if (DATA_DIR / f"{path_or_name}.csv").is_file():
+        return DATA_DIR / f"{path_or_name}.csv"
+    return p
+
+
+def _load_csv(name: str | Path, sample: int | None = None) -> list[dict]:
+    resolved = _resolve_csv_path(name)
+    with open(resolved, newline="", encoding="utf-8") as f:
+        raw_rows = list(csv.DictReader(f))
+
+    rows = []
+    for r in raw_rows:
+        normalized = _normalize_csv_row(r)
+        if normalized is not None:
+            rows.append(normalized)
+
     if sample is None or sample >= len(rows):
         return rows
     # Sort the sampled indices so cached rows stay in a stable order across runs.
@@ -152,23 +220,33 @@ def score_answerable(
     if not results:
         return {"name": name, "n": 0}
 
-    recalls = [
-        1.0 if row["document_index"] in set(result["retrieved_indices"]) else 0.0
-        for row, result in zip(rows, results)
-    ]
+    # Check if rows have document_index specified
+    has_doc_index = any(
+        row.get("document_index") is not None and str(row.get("document_index")).strip() != ""
+        for row in rows
+    )
+    recalls = []
+    if has_doc_index:
+        for row, result in zip(rows, results):
+            doc_idx = str(row.get("document_index", ""))
+            retrieved = set(result.get("retrieved_indices", []))
+            recalls.append(1.0 if doc_idx and doc_idx in retrieved else 0.0)
+
     overlaps = [
-        _answer_overlap(row["answer"], result["answer"])
+        _answer_overlap(row.get("answer", ""), result.get("answer", ""))
         for row, result in zip(rows, results)
     ]
 
-    pass_rate = sum(1 for o in overlaps if o >= overlap_threshold) / len(overlaps)
-    return {
+    pass_rate = sum(1 for o in overlaps if o >= overlap_threshold) / len(overlaps) if overlaps else 0.0
+    metrics = {
         "name": name,
         "n": len(results),
-        f"recall@{RETRIEVE_K}": statistics.mean(recalls),
-        "mean_answer_overlap": statistics.mean(overlaps),
-        f"pass_rate(overlap>={overlap_threshold})": pass_rate,
     }
+    if recalls:
+        metrics[f"recall@{RETRIEVE_K}"] = statistics.mean(recalls)
+    metrics["mean_answer_overlap"] = statistics.mean(overlaps) if overlaps else 0.0
+    metrics[f"pass_rate(overlap>={overlap_threshold})"] = pass_rate
+    return metrics
 
 
 def score_no_answer(name: str, rows: list[dict], results: list[dict]) -> dict:
@@ -179,7 +257,7 @@ def score_no_answer(name: str, rows: list[dict], results: list[dict]) -> dict:
     refused = sum(
         1
         for result in results
-        if any(p in result["answer"].lower() for p in REFUSAL_PATTERNS)
+        if any(p in result.get("answer", "").lower() for p in REFUSAL_PATTERNS)
     )
     return {
         "name": name,
@@ -189,7 +267,7 @@ def score_no_answer(name: str, rows: list[dict], results: list[dict]) -> dict:
 
 
 def eval_answerable(
-    name: str,
+    name: str | Path,
     workers: int = DEFAULT_WORKERS,
     cache: ResultCache | None = None,
     sample: int | None = None,
@@ -197,39 +275,37 @@ def eval_answerable(
     model: str | None = None,
 ) -> dict:
     rows = _load_csv(name, sample)
+    suite_name = Path(name).name
     if not rows:
-        return {"name": name, "n": 0}
-    # ``is None``, not truthiness: an empty ResultCache has len() == 0 and is
-    # therefore falsy, which would silently swap a real cache for the dummy.
+        return {"name": suite_name, "n": 0}
     results = _run_suite(
-        name, rows, workers, _dummy_cache() if cache is None else cache, model
+        suite_name, rows, workers, _dummy_cache() if cache is None else cache, model
     )
-    return score_answerable(name, rows, results, overlap_threshold)
+    return score_answerable(suite_name, rows, results, overlap_threshold)
 
 
 def eval_no_answer(
-    name: str,
+    name: str | Path,
     workers: int = DEFAULT_WORKERS,
     cache: ResultCache | None = None,
     sample: int | None = None,
     model: str | None = None,
 ) -> dict:
     rows = _load_csv(name, sample)
+    suite_name = Path(name).name
     if not rows:
-        return {"name": name, "n": 0}
-    # ``is None``, not truthiness: an empty ResultCache has len() == 0 and is
-    # therefore falsy, which would silently swap a real cache for the dummy.
+        return {"name": suite_name, "n": 0}
     results = _run_suite(
-        name, rows, workers, _dummy_cache() if cache is None else cache, model
+        suite_name, rows, workers, _dummy_cache() if cache is None else cache, model
     )
-    return score_no_answer(name, rows, results)
+    return score_no_answer(suite_name, rows, results)
 
 
 class _Suite:
     """One question set plus the answers collected for it so far."""
 
-    def __init__(self, csv_name: str, scorer: Callable[[str, list, list], dict], rows: list[dict]):
-        self.name = csv_name
+    def __init__(self, name: str, scorer: Callable[[str, list, list], dict], rows: list[dict]):
+        self.name = name
         self.scorer = scorer
         self.rows = rows
         self.results: list[dict] = []
@@ -242,6 +318,18 @@ class _Suite:
         return self.scorer(self.name, self.rows, self.results)
 
 
+def build_suite(
+    path_or_name: str | Path, sample: int | None = None, name: str | None = None
+) -> _Suite:
+    """Build a suite from a CSV path or name, automatically picking the scoring strategy."""
+    resolved = _resolve_csv_path(path_or_name)
+    suite_name = name or resolved.name
+    rows = _load_csv(resolved, sample=sample)
+    has_answers = any(bool(r.get("answer") and str(r.get("answer")).strip()) for r in rows)
+    scorer = score_answerable if has_answers else score_no_answer
+    return _Suite(suite_name, scorer, rows)
+
+
 def run_all(
     workers: int = DEFAULT_WORKERS,
     sample: int | None = None,
@@ -250,29 +338,33 @@ def run_all(
     chunk_size: int = CHUNK_SIZE,
     on_progress: Callable[[list[dict], int, int], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
+    test_files: list[str | Path] | None = None,
 ) -> list[dict]:
-    """Run all three suites interleaved in chunks and return their metric dicts.
+    """Run benchmark suites interleaved in chunks and return their metric dicts.
 
     The programmatic entry point -- ``main`` is a thin CLI wrapper over this so
     the API can run a benchmark without going through argv or stdout.
 
-    ``on_progress(metrics, done, total)`` fires after every chunk with metrics
-    for *all* suites scored over what has been answered so far, which is what
-    lets a caller display live numbers. ``should_stop()`` is polled at the same
-    points; returning True ends the run and returns the partial metrics rather
-    than raising, so a stopped run is still a readable result.
+    Supports custom test files (via `test_files`), defaulting to the three built-in
+    benchmark suites if omitted.
     """
     if model not in AVAILABLE_MODELS:
         raise ValueError(
             f"model is required -- choose from {list(AVAILABLE_MODELS)}"
         )
 
-    suites = [
-        _Suite("single_passage_answer_questions.csv", score_answerable, _load_csv("single_passage_answer_questions.csv", sample)),
-        _Suite("multi_passage_answer_questions.csv", score_answerable, _load_csv("multi_passage_answer_questions.csv", sample)),
-        _Suite("no_answer_questions.csv", score_no_answer, _load_csv("no_answer_questions.csv", sample)),
-    ]
+    if test_files:
+        suites = [build_suite(f, sample=sample) for f in test_files]
+    else:
+        suites = [
+            _Suite("single_passage_answer_questions.csv", score_answerable, _load_csv("single_passage_answer_questions.csv", sample)),
+            _Suite("multi_passage_answer_questions.csv", score_answerable, _load_csv("multi_passage_answer_questions.csv", sample)),
+            _Suite("no_answer_questions.csv", score_no_answer, _load_csv("no_answer_questions.csv", sample)),
+        ]
     total = sum(len(s.rows) for s in suites)
+
+    if total == 0:
+        return [s.score() for s in suites]
 
     cache_path = CACHE_DIR / f"{config_fingerprint(model)}.jsonl"
     with ResultCache(cache_path, enabled=use_cache) as cache:
@@ -297,7 +389,10 @@ def _report(results: list[dict]) -> None:
         for k, v in r.items():
             if k in ("name", "n"):
                 continue
-            print(f"  {k}: {v:.2f}")
+            if isinstance(v, (int, float)):
+                print(f"  {k}: {v:.2f}")
+            else:
+                print(f"  {k}: {v}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -326,13 +421,35 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="ignore and do not write cached answers",
     )
+    parser.add_argument(
+        "--test-file",
+        action="append",
+        dest="test_files",
+        help="custom test CSV file(s) to benchmark (can be specified multiple times)",
+    )
+    parser.add_argument(
+        "--test-dir",
+        type=Path,
+        help="directory containing custom test CSV files",
+    )
     args = parser.parse_args(argv)
+
+    test_files = args.test_files or []
+    if args.test_dir:
+        if not args.test_dir.is_dir():
+            print(f"error: {args.test_dir} is not a directory", file=sys.stderr)
+            return 1
+        found_csvs = sorted(args.test_dir.glob("*.csv"))
+        test_files.extend(str(p) for p in found_csvs if not p.name.startswith("documents"))
+
+    test_files_arg = test_files if test_files else None
 
     fingerprint = config_fingerprint(args.model)
     scope = f"sample {args.sample}/suite" if args.sample else "full"
+    suites_desc = f"{len(test_files)} custom suites" if test_files else "default 3 suites"
     print(
         f"config {fingerprint}, model {args.model}, "
-        f"{args.workers} workers, {scope}, chunks of {args.chunk_size}"
+        f"{args.workers} workers, {scope}, chunks of {args.chunk_size} ({suites_desc})"
     )
     if not args.no_cache:
         print(f"cache {CACHE_DIR / f'{fingerprint}.jsonl'}")
@@ -348,6 +465,7 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             chunk_size=args.chunk_size,
             on_progress=_tick,
+            test_files=test_files_arg,
         )
     except KeyboardInterrupt:
         # Every answer completed before the interrupt is already flushed;

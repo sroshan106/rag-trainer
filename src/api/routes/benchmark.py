@@ -1,4 +1,4 @@
-"""The Benchmark view's backing route.
+"""The Benchmark view's backing routes.
 
 Wraps ``tests.benchmark.run_benchmark.run_all`` as a background job -- a full
 run is on the order of minutes (roughly 100 questions, several LLM calls
@@ -6,6 +6,8 @@ each), too long to hold a request open. ``run_all`` interleaves its suites in
 chunks and reports after each one, so the job publishes a real percentage and
 running per-suite metrics as it goes: the view can show numbers for a partial
 run instead of nothing until the end.
+
+Supports modular custom test suites and datasets uploaded by users.
 
 Stopping is cooperative -- ``should_stop`` is polled between chunks, so a
 cancel lands within one chunk rather than instantly. Killing threads mid-LLM
@@ -17,9 +19,12 @@ not exist yet in a partially-synced checkout, and the rest of the API must
 keep working if so.
 """
 
-from fastapi import APIRouter, HTTPException
+from pathlib import Path
 
-from src.api.schemas import BenchmarkRequest, JobResponse
+from fastapi import APIRouter, File, HTTPException, UploadFile
+
+from src.api.schemas import BenchmarkRequest, BenchmarkTestFileEntry, JobResponse
+from src.benchmark import files as benchmark_files
 from src.jobs.runner import ProgressReporter, runner
 from src.rag.model_catalog import list_installed
 
@@ -31,7 +36,7 @@ except ImportError:  # pragma: no cover - exercised only if run_all is missing
     run_all = None
 
 
-def _run_benchmark(body: BenchmarkRequest):
+def _run_benchmark(body: BenchmarkRequest, test_paths: list[str] | None = None):
     def _run(reporter: ProgressReporter) -> list[dict]:
         reporter.update(progress=0.0, message="running benchmark suites")
 
@@ -42,15 +47,19 @@ def _run_benchmark(body: BenchmarkRequest):
                 result=metrics,
             )
 
-        results = run_all(
-            body.workers,
-            body.sample,
-            use_cache=body.use_cache,
-            model=body.model,
-            chunk_size=body.chunk_size,
-            on_progress=on_progress,
-            should_stop=lambda: reporter.cancelled,
-        )
+        kwargs = {
+            "workers": body.workers,
+            "sample": body.sample,
+            "use_cache": body.use_cache,
+            "model": body.model,
+            "chunk_size": body.chunk_size,
+            "on_progress": on_progress,
+            "should_stop": lambda: reporter.cancelled,
+        }
+        if test_paths is not None:
+            kwargs["test_files"] = test_paths
+
+        results = run_all(**kwargs)
         message = "benchmark stopped early" if reporter.cancelled else "benchmark complete"
         reporter.update(message=message)
         return results
@@ -63,6 +72,40 @@ def list_models() -> dict:
     # Only models actually pulled -- see src.rag.model_catalog. No "default":
     # a run must name a model, there is no fallback.
     return {"models": list_installed()}
+
+
+@router.get("/test-files", response_model=list[BenchmarkTestFileEntry])
+def list_test_files() -> list[dict]:
+    """List all available benchmark test suites, both built-in and user-uploaded."""
+    return benchmark_files.list_test_files()
+
+
+@router.post("/test-files/upload", response_model=BenchmarkTestFileEntry, status_code=201)
+def upload_test_file(file: UploadFile = File(...)) -> dict:
+    """Upload a custom benchmark test CSV containing questions and optional answers/document indices."""
+    original = Path(file.filename or "test_questions.csv").name
+    if not original.lower().endswith(".csv"):
+        raise HTTPException(status_code=415, detail="only .csv files are supported")
+
+    content = file.file.read()
+    try:
+        entry = benchmark_files.save_uploaded_test_file(original, content)
+    except benchmark_files.UnusableTestFile as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"could not process test CSV: {exc}") from exc
+
+    return entry
+
+
+@router.delete("/test-files/{file_id}")
+def delete_test_file(file_id: str) -> dict:
+    """Delete an uploaded custom benchmark test suite."""
+    try:
+        deleted = benchmark_files.delete_uploaded_test_file(file_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="no such uploaded test file")
+    return {"id": deleted["id"], "filename": deleted["filename"]}
 
 
 @router.post("", response_model=JobResponse, status_code=202)
@@ -83,14 +126,26 @@ def start_benchmark(body: BenchmarkRequest) -> dict:
             status_code=422,
             detail=f"unknown model {body.model!r} -- choose from {installed}",
         )
+
+    resolved_paths: list[str] | None = None
+    if body.test_files:
+        resolved_paths = []
+        for tf in body.test_files:
+            try:
+                path = benchmark_files.resolve_test_file_path(tf)
+                resolved_paths.append(str(path))
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     job_params = {
         "model": body.model,
         "workers": body.workers,
         "sample": body.sample,
         "chunk_size": body.chunk_size,
         "use_cache": body.use_cache,
+        "test_files": body.test_files,
     }
-    job = runner.submit("benchmark", _run_benchmark(body), params=job_params)
+    job = runner.submit("benchmark", _run_benchmark(body, resolved_paths), params=job_params)
     return job.to_dict()
 
 
