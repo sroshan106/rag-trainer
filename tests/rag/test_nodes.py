@@ -1,3 +1,4 @@
+import pytest
 from langchain_core.documents import Document
 
 from src.rag import nodes
@@ -155,7 +156,7 @@ def test_generate_node_calls_llm_with_formatted_context(monkeypatch):
     monkeypatch.setattr(nodes, "_get_llm", lambda model=None: fake_llm)
     docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
 
-    result = nodes.generate_node({"query": "what?", "graded_docs": docs})
+    result = nodes.generate_node({"query": "what?", "model": "llama3.2:3b", "graded_docs": docs})
 
     assert result["answer"] == "the answer"
     assert "fact one" in fake_llm.last_prompt
@@ -169,7 +170,7 @@ def test_generate_node_strips_a_thinking_block(monkeypatch):
     monkeypatch.setattr(nodes, "_get_llm", lambda model=None: FakeLLM(thinking_output))
     docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
 
-    result = nodes.generate_node({"query": "what?", "graded_docs": docs})
+    result = nodes.generate_node({"query": "what?", "model": "llama3.2:3b", "graded_docs": docs})
 
     assert result["answer"] == "the answer"
 
@@ -215,7 +216,7 @@ def test_generate_node_collects_sources(monkeypatch):
         Document(page_content="fact three", metadata={"source": "b.txt"}),
     ]
 
-    result = nodes.generate_node({"query": "what?", "graded_docs": docs})
+    result = nodes.generate_node({"query": "what?", "model": "llama3.2:3b", "graded_docs": docs})
 
     assert result["sources"] == ["a.txt", "b.txt"]
 
@@ -225,7 +226,7 @@ def test_generate_node_skips_sources_when_disabled(monkeypatch):
     monkeypatch.setattr(nodes, "_get_llm", lambda model=None: FakeLLM("the answer"))
     docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
 
-    result = nodes.generate_node({"query": "what?", "graded_docs": docs})
+    result = nodes.generate_node({"query": "what?", "model": "llama3.2:3b", "graded_docs": docs})
 
     assert result["answer"] == "the answer"
     assert result["sources"] == []
@@ -243,16 +244,14 @@ def test_generate_node_uses_the_requested_model(monkeypatch):
     assert seen == ["qwen3:4b"]
 
 
-def test_generate_node_defaults_model_when_absent(monkeypatch):
-    seen = []
-    monkeypatch.setattr(
-        nodes, "_get_llm", lambda model=None: seen.append(model) or FakeLLM("ok")
-    )
+def test_generate_node_raises_when_model_is_absent():
+    # No fallback: graph.py is responsible for resolving a real model before
+    # a node ever runs, so a missing "model" key is a caller bug, not
+    # something this node papers over.
     docs = [Document(page_content="fact", metadata={"source": "a.txt"})]
 
-    nodes.generate_node({"query": "q", "graded_docs": docs})
-
-    assert seen == [nodes.MODEL]
+    with pytest.raises(KeyError):
+        nodes.generate_node({"query": "q", "graded_docs": docs})
 
 
 def test_generate_node_fallback_has_empty_sources():
@@ -410,7 +409,7 @@ def test_generate_stream_yields_tokens_and_returns_the_assembled_answer(monkeypa
     monkeypatch.setattr(nodes, "_get_llm", lambda model=None: fake_llm)
     docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
 
-    tokens, result = _drain(nodes.generate_stream({"query": "what?", "graded_docs": docs}))
+    tokens, result = _drain(nodes.generate_stream({"query": "what?", "model": "llama3.2:3b", "graded_docs": docs}))
 
     assert tokens == ["the ", "answer"]
     assert result == {"answer": "the answer", "sources": ["a.txt"]}
@@ -426,7 +425,7 @@ def test_generate_stream_strips_a_streamed_thinking_block(monkeypatch):
     )
     docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
 
-    tokens, result = _drain(nodes.generate_stream({"query": "what?", "graded_docs": docs}))
+    tokens, result = _drain(nodes.generate_stream({"query": "what?", "model": "llama3.2:3b", "graded_docs": docs}))
 
     assert tokens == ["the answer"]
     assert result["answer"] == "the answer"
@@ -459,7 +458,7 @@ def test_generate_stream_closing_early_stops_the_llm(monkeypatch):
     monkeypatch.setattr(nodes, "_get_llm", lambda model=None: fake_llm)
     docs = [Document(page_content="fact", metadata={"source": "a.txt"})]
 
-    generation = nodes.generate_stream({"query": "q", "graded_docs": docs})
+    generation = nodes.generate_stream({"query": "q", "model": "llama3.2:3b", "graded_docs": docs})
     assert next(generation) == "one "
     generation.close()
 
@@ -471,17 +470,26 @@ def test_generate_stream_skips_sources_when_citations_disabled(monkeypatch):
     monkeypatch.setattr(nodes, "_get_llm", lambda model=None: FakeStreamingLLM(["a"]))
     docs = [Document(page_content="fact", metadata={"source": "a.txt"})]
 
-    _, result = _drain(nodes.generate_stream({"query": "q", "graded_docs": docs}))
+    _, result = _drain(nodes.generate_stream({"query": "q", "model": "llama3.2:3b", "graded_docs": docs}))
 
     assert result["sources"] == []
 
 
-def test_prompt_for_defaults_the_model_and_builds_the_prompt():
+def test_prompt_for_requires_a_model():
     docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
 
-    model, prompt = nodes._prompt_for({"query": "what?", "graded_docs": docs})
+    with pytest.raises(KeyError):
+        nodes._prompt_for({"query": "what?", "graded_docs": docs})
 
-    assert model == nodes.MODEL
+
+def test_prompt_for_builds_the_prompt_for_the_given_model():
+    docs = [Document(page_content="fact one", metadata={"source": "a.txt"})]
+
+    model, prompt = nodes._prompt_for(
+        {"query": "what?", "model": "llama3.2:3b", "graded_docs": docs}
+    )
+
+    assert model == "llama3.2:3b"
     assert "fact one" in prompt
     assert "what?" in prompt
 

@@ -6,6 +6,11 @@ from src.api.app import app
 
 client = TestClient(app)
 
+# No default model exists anymore -- every request below must name one
+# explicitly. Matches what src.rag.model_catalog.list_installed() actually
+# reports against the live Ollama instance these tests run against.
+TEST_MODEL = "llama3.2:3b"
+
 
 def test_query_returns_answer_and_sources(monkeypatch):
     monkeypatch.setattr(
@@ -13,7 +18,7 @@ def test_query_returns_answer_and_sources(monkeypatch):
         lambda q, model=None: {"answer": f"answer to {q}", "sources": ["http://example.com"]},
     )
 
-    resp = client.post("/api/query", json={"query": "what is this?"})
+    resp = client.post("/api/query", json={"query": "what is this?", "model": TEST_MODEL})
 
     assert resp.status_code == 200
     body = resp.json()
@@ -42,17 +47,24 @@ def test_query_rejects_an_unknown_model():
     assert resp.status_code == 422
 
 
-def test_list_models_reports_available_and_default():
+def test_query_rejects_when_no_model_given():
+    # No fallback -- a query without a model is a 422, not a silent default.
+    resp = client.post("/api/query", json={"query": "q"})
+
+    assert resp.status_code == 422
+
+
+def test_list_models_reports_only_installed_models():
     resp = client.get("/api/query/models")
 
     assert resp.status_code == 200
     body = resp.json()
     assert "llama3.2:3b" in body["models"]
-    assert body["default"] == "llama3.2:3b"
+    assert "default" not in body
 
 
 def test_query_rejects_empty_string():
-    resp = client.post("/api/query", json={"query": ""})
+    resp = client.post("/api/query", json={"query": "", "model": TEST_MODEL})
 
     assert resp.status_code == 422
 
@@ -63,7 +75,7 @@ def test_query_failure_surfaces_as_502(monkeypatch):
 
     monkeypatch.setattr("src.api.routes.query.ask", _boom)
 
-    resp = client.post("/api/query", json={"query": "hello"})
+    resp = client.post("/api/query", json={"query": "hello", "model": TEST_MODEL})
 
     assert resp.status_code == 502
     assert "ollama unreachable" in resp.json()["detail"]
@@ -91,7 +103,7 @@ def test_stream_emits_the_events_ask_stream_produced(monkeypatch):
 
     monkeypatch.setattr("src.api.routes.query.ask_stream", fake_ask_stream)
 
-    resp = client.post("/api/query/stream", json={"query": "what is this?"})
+    resp = client.post("/api/query/stream", json={"query": "what is this?", "model": TEST_MODEL})
 
     assert resp.status_code == 200
     events = _sse_events(resp.text)
@@ -106,7 +118,7 @@ def test_stream_names_each_sse_event_after_its_type(monkeypatch):
 
     monkeypatch.setattr("src.api.routes.query.ask_stream", fake_ask_stream)
 
-    resp = client.post("/api/query/stream", json={"query": "q"})
+    resp = client.post("/api/query/stream", json={"query": "q", "model": TEST_MODEL})
 
     assert "event: done" in resp.text
 
@@ -131,13 +143,21 @@ def test_stream_rejects_an_unknown_model():
     assert resp.status_code == 422
 
 
+def test_stream_rejects_when_no_model_given():
+    resp = client.post("/api/query/stream", json={"query": "q"})
+
+    assert resp.status_code == 422
+
+
 def test_stream_forwards_an_error_event(monkeypatch):
     def fake_ask_stream(query, model=None):
         yield {"type": "error", "detail": "ollama unreachable"}
 
     monkeypatch.setattr("src.api.routes.query.ask_stream", fake_ask_stream)
 
-    events = _sse_events(client.post("/api/query/stream", json={"query": "q"}).text)
+    events = _sse_events(
+        client.post("/api/query/stream", json={"query": "q", "model": TEST_MODEL}).text
+    )
 
     assert events == [{"type": "error", "detail": "ollama unreachable"}]
 

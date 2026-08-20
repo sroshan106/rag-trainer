@@ -18,6 +18,7 @@ from collections import defaultdict
 
 from src.observability import tracing
 from src.rag.graph import ask
+from src.rag.model_catalog import list_installed
 
 # Mix of hits and misses — the refusal path skips generation entirely, so an
 # all-hits sample would overstate typical latency.
@@ -40,12 +41,12 @@ def _percentile(values: list[float], pct: float) -> float:
     return ordered[index]
 
 
-def measure(repeats: int = DEFAULT_REPEATS) -> dict[str, list[float]]:
+def measure(model: str, repeats: int = DEFAULT_REPEATS) -> dict[str, list[float]]:
     by_node: dict[str, list[float]] = defaultdict(list)
     for _ in range(repeats):
         for query in QUERIES:
             with tracing.collect() as spans:
-                ask(query)
+                ask(query, model=model)
             for span in spans:
                 by_node[span["span"]].append(span["duration_ms"])
     return by_node
@@ -54,9 +55,20 @@ def measure(repeats: int = DEFAULT_REPEATS) -> dict[str, list[float]]:
 def main() -> int:
     repeats = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_REPEATS
     total = repeats * len(QUERIES)
+
+    # No default model -- pick whichever is installed, same convention as
+    # src.rag.graph.main.
+    installed = list_installed()
+    if not installed:
+        print("no chat model downloaded -- pull one first (see Settings, or "
+              "`ollama pull <model>`)")
+        return 1
+    model = installed[0]
+
+    print(f"model: {model}")
     print(f"running {total} queries ({len(QUERIES)} queries x {repeats} repeats)\n")
 
-    by_node = measure(repeats)
+    by_node = measure(model, repeats)
 
     header = f"{'node':<10}{'n':>4}{'mean':>10}{'p50':>10}{'p95':>10}{'p99':>10}{'max':>10}"
     print(header)

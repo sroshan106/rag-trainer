@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import Card from "../components/Card.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 import { startBenchmark, benchmarkHistory, benchmarkModels, cancelJob, pollJob } from "../api.js";
@@ -10,6 +11,7 @@ export default function Benchmark() {
   const [useCache, setUseCache] = useState(true);
   const [models, setModels] = useState([]);
   const [model, setModel] = useState("");
+  const [modelsLoaded, setModelsLoaded] = useState(false);
   const [job, setJob] = useState(null);
   const [history, setHistory] = useState([]);
   const [error, setError] = useState(null);
@@ -29,12 +31,15 @@ export default function Benchmark() {
   useEffect(() => {
     loadHistory();
     benchmarkModels()
-      .then(({ models: available, default: fallback }) => {
+      .then(({ models: available }) => {
         setModels(available);
-        setModel(fallback);
+        setModelsLoaded(true);
+        // No server default -- auto-pick the first installed model so a run
+        // still needs one explicit click, not a manual selection every time.
+        setModel(available[0] || "");
       })
       .catch(() => {
-        // an empty picker falls back to the server-side default model
+        // No API yet -- the picker stays empty.
       });
   }, []);
 
@@ -83,6 +88,18 @@ export default function Benchmark() {
 
   return (
     <div className="flex flex-col gap-4">
+      {modelsLoaded && models.length === 0 && (
+        <Card className="border-amber-300 dark:border-amber-800">
+          <p className="text-sm">
+            No chat model is downloaded yet, so there is nothing to benchmark against.{" "}
+            <Link to="/settings" className="font-medium underline">
+              Download one in Settings
+            </Link>{" "}
+            first.
+          </p>
+        </Card>
+      )}
+
       <Card
         title="Benchmark"
         subtitle="Runs the labeled question sets in interleaved chunks, so every suite reports numbers while the run is still going."
@@ -143,7 +160,7 @@ export default function Benchmark() {
         <div className="flex items-center gap-2">
           <button
             onClick={onStart}
-            disabled={running}
+            disabled={running || !model}
             className="rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
             {running ? "Running..." : "Run benchmark"}

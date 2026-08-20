@@ -16,7 +16,6 @@ from sse_starlette.sse import EventSourceResponse
 from src.api.schemas import CollectionStatus, QueryRequest, QueryResponse
 from src.rag.graph import ask, ask_stream
 from src.rag.model_catalog import list_installed
-from src.rag.nodes import MODEL
 from src.vectorstore.store import count_chunks
 
 router = APIRouter(prefix="/api/query", tags=["query"])
@@ -25,15 +24,17 @@ router = APIRouter(prefix="/api/query", tags=["query"])
 @router.get("/models")
 def list_models() -> dict:
     # Only models actually pulled -- a catalog entry mid-download or never
-    # fetched must not be selectable here, see src.rag.model_catalog.
-    return {"models": list_installed(), "default": MODEL}
+    # fetched must not be selectable here, see src.rag.model_catalog. No
+    # "default" key: there is no fallback model, the UI must make the user
+    # pick one of these (and download one first if the list is empty).
+    return {"models": list_installed()}
 
 
 @router.post("", response_model=QueryResponse)
 def run_query(body: QueryRequest) -> dict:
-    _validated_model(body.model)
+    model = _validated_model(body.model)
     try:
-        return ask(body.query, model=body.model)
+        return ask(body.query, model=model)
     except Exception as exc:  # noqa: BLE001 - surfaced to the client as a 502
         raise HTTPException(status_code=502, detail=f"query failed: {exc}") from exc
 
@@ -50,9 +51,14 @@ def collection_status() -> dict:
     return {"chunks": chunks, "empty": chunks == 0}
 
 
-def _validated_model(model: str | None) -> str | None:
+def _validated_model(model: str | None) -> str:
     installed = list_installed()
-    if model is not None and model not in installed:
+    if model not in installed:
+        if not installed:
+            raise HTTPException(
+                status_code=422,
+                detail="no chat model downloaded -- download one in Settings first",
+            )
         raise HTTPException(
             status_code=422,
             detail=f"unknown model {model!r} -- choose from {installed}",

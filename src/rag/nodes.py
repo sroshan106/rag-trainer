@@ -13,15 +13,22 @@ from src.vectorstore import hybrid, rerank
 from src.vectorstore.store import load_vectorstore
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-MODEL = "llama3.2:3b"
 
-# Both served locally by the same Ollama instance -- picking a second model
-# means picking a second local weights file, not adding a cloud provider.
-# qwen3:4b (Q4, ~2.5GB) is the Tier A pick for this card: it leaves headroom
-# under the 3.0GB budget for a reranker to run alongside it, unlike
-# qwen2.5:7b's ~4.7GB. Keep this in sync with what's actually pulled
-# (`docker exec <ollama container> ollama list`).
-AVAILABLE_MODELS = (MODEL, "qwen3:4b")
+# Every chat model this card can run, sized to fit 4GB VRAM alongside the
+# reranker (~3.0GB budget -- see rerank.py). No entry here is "the default":
+# a query must name one explicitly, and the API layer only accepts a name
+# that's both in this tuple and actually pulled (src.rag.model_catalog) --
+# there is deliberately no fallback that lets an un-downloaded model answer.
+# Keep in sync with what's actually offered for download
+# (src.rag.model_catalog.CATALOG mirrors this).
+AVAILABLE_MODELS = (
+    "llama3.2:3b",
+    "llama3.2:1b",
+    "qwen3:4b",
+    "qwen2.5:3b",
+    "gemma2:2b",
+    "phi3.5",
+)
 
 RETRIEVE_K = 5
 
@@ -89,7 +96,7 @@ def _get_vectorstore():
     return _vectorstore
 
 
-def _get_llm(model: str = MODEL) -> ChatOllama:
+def _get_llm(model: str) -> ChatOllama:
     llm = _llms.get(model)
     if llm is None:
         with _init_lock:
@@ -277,7 +284,9 @@ def _refusal() -> dict:
 
 def _prompt_for(state: dict) -> tuple[str, str]:
     """Build the generation prompt. Returns ``(model, prompt)``."""
-    model = state.get("model") or MODEL
+    # No fallback: graph.py rejects an unresolved model before a node ever
+    # runs, so state["model"] is always a validated, installed model by now.
+    model = state["model"]
     context = format_context(state["graded_docs"])
     prompt = RAG_PROMPT.format(context=context, question=state["query"])
     if _wants_no_think(model):

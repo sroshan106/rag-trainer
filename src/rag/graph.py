@@ -12,12 +12,25 @@ from src.rag import history
 from src.rag.citations import format_sources
 from src.rag.nodes import (
     AVAILABLE_MODELS,
-    MODEL,
     generate_node,
     generate_stream,
     grade_node,
     retrieve_node,
 )
+
+
+def _resolve_model(model: str | None) -> str:
+    """No default: a caller must name an installed model or get a clear error.
+
+    Catalog membership only -- whether it's actually pulled is the API
+    layer's job (src.rag.model_catalog), which is where a request first
+    lands and where the "go download it" message belongs.
+    """
+    if model not in AVAILABLE_MODELS:
+        raise ValueError(
+            f"model is required -- choose one of {list(AVAILABLE_MODELS)}"
+        )
+    return model
 
 
 class RAGState(TypedDict):
@@ -54,13 +67,13 @@ graph = build_graph()
 def ask(query: str, model: str | None = None) -> dict:
     """Return the answer plus the sources it was grounded in.
 
-    ``model`` picks which of AVAILABLE_MODELS answers the query; omitted or
-    unrecognized falls back to the default. ``sources`` is empty when the
+    ``model`` picks which of AVAILABLE_MODELS answers the query -- required,
+    no default; raises ``ValueError`` if omitted or unrecognized. ``sources`` is empty when the
     citations extension is disabled. The exchange is also written to the
     query history table unless RAG_HISTORY=false; that write cannot fail the
     call.
     """
-    resolved_model = model if model in AVAILABLE_MODELS else MODEL
+    resolved_model = _resolve_model(model)
     started = time.perf_counter()
     entry_id = history.start(query=query, model=resolved_model)
     try:
@@ -109,7 +122,7 @@ def ask_stream(query: str, model: str | None = None):
     Closing this generator (client disconnect, or Cancel) stops generation and
     records the run as cancelled with whatever text had already streamed.
     """
-    resolved_model = model if model in AVAILABLE_MODELS else MODEL
+    resolved_model = _resolve_model(model)
     started = time.perf_counter()
     entry_id = history.start(query=query, model=resolved_model)
     parts: list[str] = []
@@ -188,8 +201,22 @@ def main() -> int:
     if tracing.tracing_enabled():
         tracing.configure_logging()
     query = " ".join(sys.argv[1:]) or "What is this document collection about?"
+
+    # CLI convenience only -- picks whichever installed model comes first
+    # rather than making an ad hoc script pass --model. The API has no such
+    # fallback; see _resolve_model.
+    from src.rag.model_catalog import list_installed
+
+    installed = list_installed()
+    if not installed:
+        print("no chat model downloaded -- pull one first (see Settings, or "
+              "`ollama pull <model>`)")
+        return 1
+    model = installed[0]
+
     print(f"query: {query}")
-    result = ask(query)
+    print(f"model: {model}")
+    result = ask(query, model=model)
     print(f"answer: {result['answer']}")
     sources = format_sources(result["sources"])
     if sources:

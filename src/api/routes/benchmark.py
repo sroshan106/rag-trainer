@@ -22,7 +22,6 @@ from fastapi import APIRouter, HTTPException
 from src.api.schemas import BenchmarkRequest, JobResponse
 from src.jobs.runner import ProgressReporter, runner
 from src.rag.model_catalog import list_installed
-from src.rag.nodes import MODEL
 
 router = APIRouter(prefix="/api/benchmark", tags=["benchmark"])
 
@@ -61,8 +60,9 @@ def _run_benchmark(body: BenchmarkRequest):
 
 @router.get("/models")
 def list_models() -> dict:
-    # Only models actually pulled -- see src.rag.model_catalog.
-    return {"models": list_installed(), "default": MODEL}
+    # Only models actually pulled -- see src.rag.model_catalog. No "default":
+    # a run must name a model, there is no fallback.
+    return {"models": list_installed()}
 
 
 @router.post("", response_model=JobResponse, status_code=202)
@@ -73,7 +73,12 @@ def start_benchmark(body: BenchmarkRequest) -> dict:
             detail="tests.benchmark.run_benchmark.run_all is not available yet",
         )
     installed = list_installed()
-    if body.model is not None and body.model not in installed:
+    if body.model not in installed:
+        if not installed:
+            raise HTTPException(
+                status_code=422,
+                detail="no chat model downloaded -- download one in Settings first",
+            )
         raise HTTPException(
             status_code=422,
             detail=f"unknown model {body.model!r} -- choose from {installed}",

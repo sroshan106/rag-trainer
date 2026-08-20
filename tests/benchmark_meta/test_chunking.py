@@ -29,6 +29,7 @@ def test_every_suite_reports_after_the_first_round(fake_llm):
         workers=2,
         sample=25,
         use_cache=False,
+        model="llama3.2:3b",
         chunk_size=10,
         on_progress=lambda metrics, done, total: ticks.append((metrics, done, total)),
     )
@@ -46,6 +47,7 @@ def test_progress_is_monotonic_and_ends_complete(fake_llm):
         workers=2,
         sample=25,
         use_cache=False,
+        model="llama3.2:3b",
         chunk_size=10,
         on_progress=lambda metrics, done, total: ticks.append(done),
     )
@@ -67,6 +69,7 @@ def test_stopping_returns_partial_metrics_for_all_suites(fake_llm):
         workers=2,
         sample=25,
         use_cache=False,
+        model="llama3.2:3b",
         chunk_size=10,
         should_stop=should_stop,
     )
@@ -79,7 +82,7 @@ def test_stopping_returns_partial_metrics_for_all_suites(fake_llm):
 
 def test_stopping_before_the_first_chunk_yields_empty_suites(fake_llm):
     results = run_benchmark.run_all(
-        workers=2, sample=5, use_cache=False, should_stop=lambda: True
+        workers=2, sample=5, use_cache=False, model="llama3.2:3b", should_stop=lambda: True
     )
 
     assert [r["n"] for r in results] == [0, 0, 0]
@@ -87,7 +90,7 @@ def test_stopping_before_the_first_chunk_yields_empty_suites(fake_llm):
 
 
 def test_unknown_model_is_rejected_before_any_llm_call(fake_llm):
-    with pytest.raises(ValueError, match="unknown model"):
+    with pytest.raises(ValueError, match="model is required"):
         run_benchmark.run_all(sample=5, use_cache=False, model="gpt-nope")
 
     assert fake_llm == []

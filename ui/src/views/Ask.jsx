@@ -26,6 +26,7 @@ export default function Ask() {
   const [historyError, setHistoryError] = useState(null);
   const [models, setModels] = useState([]);
   const [model, setModel] = useState("");
+  const [modelsLoaded, setModelsLoaded] = useState(false);
   const [collection, setCollection] = useState(null);
 
   const inputRef = useRef(null);
@@ -34,13 +35,17 @@ export default function Ask() {
 
   useEffect(() => {
     queryModels()
-      .then(({ models: available, default: def }) => {
+      .then(({ models: available }) => {
         setModels(available);
+        setModelsLoaded(true);
+        // No server default anymore -- fall back to "" (nothing selected)
+        // rather than guessing, which the Ask button's disabled state
+        // enforces below.
         const saved = localStorage.getItem(MODEL_STORAGE_KEY);
-        setModel(saved && available.includes(saved) ? saved : def);
+        setModel(saved && available.includes(saved) ? saved : available[0] || "");
       })
       .catch(() => {
-        // No API yet -- the select stays empty and the server picks its default.
+        // No API yet -- the select stays empty.
       });
     collectionStatus()
       .then(setCollection)
@@ -136,7 +141,7 @@ export default function Ask() {
   function onSubmit(e) {
     e.preventDefault();
     const text = query.trim();
-    if (!text || loading) return;
+    if (!text || !model || loading) return;
     setQuery("");
     ask(text, model);
   }
@@ -241,7 +246,7 @@ export default function Ask() {
           ) : (
             <button
               type="submit"
-              disabled={!query.trim()}
+              disabled={!query.trim() || !model}
               className="rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 px-4 py-2 text-sm font-medium disabled:opacity-50"
             >
               Ask
@@ -249,6 +254,18 @@ export default function Ask() {
           )}
         </form>
       </Card>
+
+      {modelsLoaded && models.length === 0 && (
+        <Card className="border-amber-300 dark:border-amber-800">
+          <p className="text-sm">
+            No chat model is downloaded yet, so there is nothing to answer with.{" "}
+            <Link to="/settings" className="font-medium underline">
+              Download one in Settings
+            </Link>{" "}
+            first.
+          </p>
+        </Card>
+      )}
 
       {collection?.empty && (
         <Card className="border-amber-300 dark:border-amber-800">

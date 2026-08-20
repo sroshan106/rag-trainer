@@ -70,8 +70,11 @@ def streaming(monkeypatch):
     return fake_history
 
 
+TEST_MODEL = "llama3.2:3b"
+
+
 def test_ask_stream_emits_stages_then_tokens_then_done(streaming):
-    events = list(graph_module.ask_stream("what?"))
+    events = list(graph_module.ask_stream("what?", model=TEST_MODEL))
 
     assert [e["type"] for e in events] == [
         "stage",
@@ -89,20 +92,20 @@ def test_ask_stream_emits_stages_then_tokens_then_done(streaming):
 
 
 def test_ask_stream_done_carries_the_answer_and_timings(streaming):
-    done = list(graph_module.ask_stream("what?"))[-1]
+    done = list(graph_module.ask_stream("what?", model=TEST_MODEL))[-1]
 
     assert done["type"] == "done"
     assert done["id"] == "entry-1"
     assert done["answer"] == "the answer"
     assert done["sources"] == ["a.txt"]
     assert done["refused"] is False
-    assert done["model"] == graph_module.MODEL
+    assert done["model"] == TEST_MODEL
     assert isinstance(done["latency_ms"], float)
     assert "rerank_ms" in done and "generate_ms" in done
 
 
 def test_ask_stream_records_the_completed_answer(streaming):
-    list(graph_module.ask_stream("what?"))
+    list(graph_module.ask_stream("what?", model=TEST_MODEL))
 
     entry_id, values = streaming.completed
     assert entry_id == "entry-1"
@@ -110,10 +113,16 @@ def test_ask_stream_records_the_completed_answer(streaming):
     assert values["sources"] == ["a.txt"]
 
 
-def test_ask_stream_falls_back_to_the_default_model_when_unknown(streaming):
-    done = list(graph_module.ask_stream("q", model="gpt-4"))[-1]
+def test_ask_stream_raises_for_an_unrecognized_model(streaming):
+    # No fallback: an unknown model is a caller error, not silently swapped
+    # for whatever the default used to be.
+    with pytest.raises(ValueError, match="model is required"):
+        list(graph_module.ask_stream("q", model="gpt-4"))
 
-    assert done["model"] == graph_module.MODEL
+
+def test_ask_stream_raises_when_no_model_given(streaming):
+    with pytest.raises(ValueError, match="model is required"):
+        list(graph_module.ask_stream("q"))
 
 
 def test_ask_stream_passes_a_known_model_through(streaming):
@@ -129,13 +138,13 @@ def test_ask_stream_marks_a_refusal_when_there_are_no_sources(monkeypatch, strea
 
     monkeypatch.setattr(graph_module, "generate_stream", refusing_stream)
 
-    done = list(graph_module.ask_stream("q"))[-1]
+    done = list(graph_module.ask_stream("q", model=TEST_MODEL))[-1]
 
     assert done["refused"] is True
 
 
 def test_ask_stream_closing_early_records_the_partial_answer(streaming):
-    events = graph_module.ask_stream("what?")
+    events = graph_module.ask_stream("what?", model=TEST_MODEL)
     seen = []
     for event in events:
         seen.append(event)
@@ -153,7 +162,7 @@ def test_ask_stream_reports_a_failure_as_an_error_event(monkeypatch, streaming):
 
     monkeypatch.setattr(graph_module, "retrieve_node", _boom)
 
-    events = list(graph_module.ask_stream("q"))
+    events = list(graph_module.ask_stream("q", model=TEST_MODEL))
 
     assert events[0] == {"type": "stage", "stage": "retrieve"}
     assert events[-1]["type"] == "error"

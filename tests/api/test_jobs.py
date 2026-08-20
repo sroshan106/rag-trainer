@@ -61,7 +61,7 @@ def test_benchmark_runs_as_background_job(monkeypatch):
         "src.api.routes.benchmark.run_all", lambda *a, **kw: fake_results
     )
 
-    resp = client.post("/api/benchmark", json={"workers": 2, "sample": 5})
+    resp = client.post("/api/benchmark", json={"workers": 2, "sample": 5, "model": "llama3.2:3b"})
     assert resp.status_code == 202
     job_id = resp.json()["id"]
 
@@ -83,7 +83,7 @@ def test_benchmark_publishes_partial_results_while_running(monkeypatch):
 
     monkeypatch.setattr("src.api.routes.benchmark.run_all", fake_run_all)
 
-    job_id = client.post("/api/benchmark", json={}).json()["id"]
+    job_id = client.post("/api/benchmark", json={"model": "llama3.2:3b"}).json()["id"]
     body = _wait_until(job_id, lambda b: b["result"] is not None)
     assert body["status"] == "running"
     assert body["result"] == partial
@@ -105,7 +105,7 @@ def test_benchmark_cancel_keeps_partial_result(monkeypatch):
 
     monkeypatch.setattr("src.api.routes.benchmark.run_all", fake_run_all)
 
-    job_id = client.post("/api/benchmark", json={}).json()["id"]
+    job_id = client.post("/api/benchmark", json={"model": "llama3.2:3b"}).json()["id"]
     _wait_until(job_id, lambda b: b["result"] is not None)
 
     assert client.post(f"/api/jobs/{job_id}/cancel").status_code == 200
@@ -121,7 +121,7 @@ def test_cancel_unknown_job_returns_404():
 
 def test_cancel_finished_job_returns_409(monkeypatch):
     monkeypatch.setattr("src.api.routes.benchmark.run_all", lambda *a, **kw: [])
-    job_id = client.post("/api/benchmark", json={}).json()["id"]
+    job_id = client.post("/api/benchmark", json={"model": "llama3.2:3b"}).json()["id"]
     _wait_for_job(job_id)
 
     assert client.post(f"/api/jobs/{job_id}/cancel").status_code == 409

@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Callable
 
 from src.rag.graph import graph
-from src.rag.nodes import AVAILABLE_MODELS, MODEL, RETRIEVE_K
+from src.rag.nodes import AVAILABLE_MODELS, RETRIEVE_K
 from tests.benchmark.cache import CACHE_DIR, ResultCache, config_fingerprint
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -96,14 +96,11 @@ def _load_csv(name: str, sample: int | None = None) -> list[dict]:
     return [rows[i] for i in picked]
 
 
-def _run(query: str, model: str | None = None) -> dict:
+def _run(query: str, model: str) -> dict:
     """Invoke the graph, reduced to the JSON-serialisable fields eval needs."""
-    state = {"query": query}
-    # Left out entirely when unset rather than passed as None, so the graph
-    # falls back to its own default instead of having to defend against one.
-    if model:
-        state["model"] = model
-    result = graph.invoke(state)
+    # No fallback -- every caller down to run_all's own validation must have
+    # already resolved a real model before this runs.
+    result = graph.invoke({"query": query, "model": model})
     return {
         "answer": result["answer"],
         "retrieved_indices": [
@@ -265,8 +262,10 @@ def run_all(
     points; returning True ends the run and returns the partial metrics rather
     than raising, so a stopped run is still a readable result.
     """
-    if model and model not in AVAILABLE_MODELS:
-        raise ValueError(f"unknown model {model!r} -- choose from {list(AVAILABLE_MODELS)}")
+    if model not in AVAILABLE_MODELS:
+        raise ValueError(
+            f"model is required -- choose from {list(AVAILABLE_MODELS)}"
+        )
 
     suites = [
         _Suite("single_passage_answer_questions.csv", score_answerable, _load_csv("single_passage_answer_questions.csv", sample)),
@@ -318,9 +317,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--model",
-        default=None,
+        required=True,
         choices=list(AVAILABLE_MODELS),
-        help=f"model to benchmark (default {MODEL})",
+        help="model to benchmark -- must already be pulled",
     )
     parser.add_argument(
         "--no-cache",
@@ -332,7 +331,7 @@ def main(argv: list[str] | None = None) -> int:
     fingerprint = config_fingerprint(args.model)
     scope = f"sample {args.sample}/suite" if args.sample else "full"
     print(
-        f"config {fingerprint}, model {args.model or MODEL}, "
+        f"config {fingerprint}, model {args.model}, "
         f"{args.workers} workers, {scope}, chunks of {args.chunk_size}"
     )
     if not args.no_cache:
