@@ -4,6 +4,23 @@ A retrieval-augmented generation pipeline that runs entirely on one machine. Doc
 
 Built and tuned against a 4GB GTX 1050, so every default here is chosen under real VRAM pressure rather than assumed abundance.
 
+## Prerequisites
+
+The compose file requests GPU access for Ollama (`driver: nvidia` device reservation). Docker Engine does not ship GPU support — install it on the host first, or containers fail with `could not select device driver "nvidia" with capabilities: [[gpu]]`:
+
+```bash
+# Ubuntu/Debian
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt update && sudo apt install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+Requires an NVIDIA driver already installed on the host (check with `nvidia-smi`). No GPU, or don't want to bother? Drop the `deploy:` GPU block from the ollama service in `docker-compose.yml` to run on CPU instead.
+
 ## Quick start
 
 ```bash
