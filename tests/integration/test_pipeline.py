@@ -32,12 +32,17 @@ KNOWN_SOURCE = "enterthegungeon.fandom.com"
 OFF_TOPIC_QUERY = "asdkjh qwe zxc nonsense gibberish"
 
 
+def _urls(result: dict) -> list[str]:
+    """The link each citation points at. See src/rag/citations.py."""
+    return [c["url"] for c in result["citations"] if c.get("url")]
+
+
 def test_known_query_returns_grounded_answer():
     result = ask(KNOWN_QUERY, model=TEST_MODEL)
 
     assert KNOWN_FACT in result["answer"].lower()
-    assert result["sources"], "expected at least one source"
-    assert any(KNOWN_SOURCE in s for s in result["sources"])
+    assert result["citations"], "expected at least one citation"
+    assert any(KNOWN_SOURCE in url for url in _urls(result))
 
 
 def test_known_query_cites_only_relevant_sources():
@@ -45,14 +50,35 @@ def test_known_query_cites_only_relevant_sources():
     # documents about fantasy books and GPT tutorials alongside the real hit.
     result = ask(KNOWN_QUERY, model=TEST_MODEL)
 
-    assert all(KNOWN_SOURCE in s for s in result["sources"])
+    assert all(KNOWN_SOURCE in url for url in _urls(result))
+
+
+def test_citations_locate_the_row_they_came_from():
+    result = ask(KNOWN_QUERY, model=TEST_MODEL)
+
+    for citation in result["citations"]:
+        assert citation["file_id"]
+        assert citation["unit_index"] is not None
+        assert citation["label"] == f"{citation['unit_kind']} {citation['unit_index']}"
+
+
+def test_citation_fields_carry_the_source_columns():
+    # The corpus declares ``index`` and ``source_url``; both are lifted out as
+    # citation fields at ingest, so an answer can name where a row came from
+    # rather than only where it sits. See src/ingestion/units.py.
+    result = ask(KNOWN_QUERY, model=TEST_MODEL)
+
+    assert result["citations"]
+    for citation in result["citations"]:
+        assert citation["fields"], "expected citation fields from the CSV columns"
+        assert KNOWN_SOURCE in citation["fields"]["source_url"]
 
 
 def test_off_topic_query_refuses_rather_than_guessing():
     result = ask(OFF_TOPIC_QUERY, model=TEST_MODEL)
 
     assert "don't have enough context" in result["answer"]
-    assert result["sources"] == []
+    assert result["citations"] == []
 
 
 def test_retrieval_returns_k_scored_documents():

@@ -1,11 +1,13 @@
+import { lazy, Suspense } from "react";
 import { NavLink, Route, Routes, Navigate } from "react-router-dom";
-import { MessageSquare, UploadCloud, Activity, BarChart3, Settings as SettingsIcon, Sparkles } from "lucide-react";
-import Ask from "./views/Ask.jsx";
-import Ingest from "./views/Ingest.jsx";
-import SystemView from "./views/System.jsx";
-import Benchmark from "./views/Benchmark.jsx";
-import Settings from "./views/Settings.jsx";
-import DocumentPage from "./views/Document.jsx";
+import { MessageSquare, UploadCloud, Activity, BarChart3, Settings as SettingsIcon, Sparkles, Loader2 } from "lucide-react";
+
+const Ask = lazy(() => import("./views/Ask.jsx"));
+const Ingest = lazy(() => import("./views/Ingest.jsx"));
+const SystemView = lazy(() => import("./views/System.jsx"));
+const Benchmark = lazy(() => import("./views/Benchmark.jsx"));
+const Settings = lazy(() => import("./views/Settings.jsx"));
+const DocumentPage = lazy(() => import("./views/Document.jsx"));
 
 const NAV = [
   { to: "/ask", label: "Ask", icon: MessageSquare },
@@ -22,6 +24,15 @@ function linkClass({ isActive }) {
       ? "bg-blue-600 text-white shadow-sm shadow-blue-500/20"
       : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60",
   ].join(" ");
+}
+
+function ViewFallback() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[400px] text-slate-400 gap-3">
+      <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+      <span className="text-xs uppercase tracking-wider font-semibold">Loading view...</span>
+    </div>
+  );
 }
 
 export default function App() {
@@ -56,19 +67,20 @@ export default function App() {
       </header>
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6">
-        <Routes>
-          <Route path="/" element={<Navigate to="/ask" replace />} />
-          <Route path="/ask" element={<Ask />} />
-          <Route path="/ingest" element={<Ingest />} />
-          {/* Not in NAV: reached from a citation or a knowledge-base entry. */}
-          <Route path="/documents/:fileId" element={<DocumentPage />} />
-          <Route path="/system" element={<SystemView />} />
-          <Route path="/benchmark" element={<Benchmark />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/ask" replace />} />
-        </Routes>
+        <Suspense fallback={<ViewFallback />}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/ask" replace />} />
+            <Route path="/ask" element={<Ask />} />
+            <Route path="/ingest" element={<Ingest />} />
+            {/* Not in NAV: reached from a citation or a knowledge-base entry. */}
+            <Route path="/documents/:fileId" element={<DocumentPage />} />
+            <Route path="/system" element={<SystemView />} />
+            <Route path="/benchmark" element={<Benchmark />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="*" element={<Navigate to="/ask" replace />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );
 }
-

@@ -44,10 +44,60 @@ function timeAgo(dateString) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+// Mirrors src/ingestion/units.py URL_COLUMNS/KEY_COLUMNS -- used only to
+// pre-check the columns the backend would otherwise auto-detect, so the
+// default selection matches what ingest does when nothing is specified.
+const CITATION_HINTS = [
+  "source_url",
+  "source",
+  "url",
+  "link",
+  "href",
+  "document_index",
+  "document_id",
+  "passage_id",
+  "doc_id",
+  "row_id",
+  "index",
+  "id",
+  "_id",
+  "idx",
+];
+
+function parseCsvHeaders(text) {
+  if (!text) return [];
+  const firstLine = text.split(/\r?\n/)[0];
+  if (!firstLine) return [];
+  const columns = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < firstLine.length; i++) {
+    const char = firstLine[i];
+    if (char === '"') {
+      if (inQuotes && firstLine[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      columns.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  columns.push(current.trim());
+  return columns.filter((c) => c.length > 0);
+}
+
 export default function Ingest() {
   const [job, setJob] = useState(null);
   const [error, setError] = useState(null);
   const [file, setFile] = useState(null);
+  const [csvColumns, setCsvColumns] = useState([]);
+  const [selectedColumns, setSelectedColumns] = useState([]);
+  const [citationColumns, setCitationColumns] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [history, setHistory] = useState([]);
   const [deletingId, setDeletingId] = useState(null);
@@ -73,6 +123,29 @@ export default function Ingest() {
 
   const refreshHistory = () => ingestHistory().then(setHistory).catch(() => {});
   const busy = submitting || (job !== null && BUSY_STATUSES.includes(job.status));
+
+  useEffect(() => {
+    if (!file || !file.name.toLowerCase().endsWith(".csv")) {
+      setCsvColumns([]);
+      setSelectedColumns([]);
+      setCitationColumns([]);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result || "";
+      const headers = parseCsvHeaders(content);
+      const cited = headers.filter((h) => CITATION_HINTS.includes(h.toLowerCase()));
+      setCsvColumns(headers);
+      // Identifier and URL columns default to cited-but-not-indexed: embedding
+      // a 130-character link spends the chunk's budget on text nobody asks a
+      // question about. Both checkboxes stay independent, so either can be
+      // overridden per column.
+      setSelectedColumns(headers.filter((h) => !cited.includes(h)));
+      setCitationColumns(cited);
+    };
+    reader.readAsText(file.slice(0, 65536));
+  }, [file]);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -135,9 +208,16 @@ export default function Ingest() {
   function onUpload() {
     if (!file) return;
     const chosen = file;
+    const isCsv = chosen.name.toLowerCase().endsWith(".csv");
+    const colsToIndex = isCsv && selectedColumns.length > 0 ? selectedColumns : null;
+    const colsToCite = isCsv && citationColumns.length > 0 ? citationColumns : null;
+
     setFile(null);
+    setCsvColumns([]);
+    setSelectedColumns([]);
+    setCitationColumns([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
-    track(() => uploadAndIngest(chosen, splitter || null));
+    track(() => uploadAndIngest(chosen, splitter || null, colsToIndex, colsToCite));
   }
 
   function handleDrop(e) {
@@ -230,6 +310,108 @@ export default function Ingest() {
           </button>
         </div>
 
+        {/* CSV Columns Selector */}
+        {file && csvColumns.length > 0 && (
+          <div className="mt-4 rounded-xl border border-slate-800/90 bg-slate-900/50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-200">Fields to Index</span>
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-950/80 text-blue-300 border border-blue-800/60">
+                    {selectedColumns.length} of {csvColumns.length} selected
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Index columns are concatenated and embedded. Citation columns (e.g. an id or URL) are
+                  stored as metadata and shown as the source when this data is used in an answer.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedColumns([...csvColumns])}
+                  className="text-[11px] text-blue-400 hover:text-blue-300 font-medium px-2.5 py-1 rounded-lg bg-blue-950/50 hover:bg-blue-950/80 border border-blue-800/50 transition-colors"
+                >
+                  Select All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedColumns([])}
+                  className="text-[11px] text-slate-400 hover:text-slate-300 font-medium px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 transition-colors"
+                >
+                  Deselect All
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 text-[10px] text-slate-500 font-medium mb-1.5 pl-1">
+              <span className="w-full" />
+              <span className="w-8 text-center shrink-0">Index</span>
+              <span className="w-8 text-center shrink-0">Cite</span>
+            </div>
+            <div className="flex flex-col gap-1 pt-1 max-h-48 overflow-y-auto pr-1">
+              {csvColumns.map((col) => {
+                const isIndexed = selectedColumns.includes(col);
+                const isCited = citationColumns.includes(col);
+                return (
+                  <div
+                    key={col}
+                    className={`flex items-center gap-4 px-2 py-1.5 rounded-lg border text-xs transition-all ${
+                      isIndexed || isCited
+                        ? "border-slate-700/70 bg-slate-900/60 text-slate-100"
+                        : "border-slate-800 bg-slate-900/30 text-slate-400"
+                    }`}
+                  >
+                    <span className="truncate font-mono text-[11px] flex-1" title={col}>
+                      {col}
+                    </span>
+                    <label className="w-8 flex items-center justify-center shrink-0 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={isIndexed}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedColumns((prev) => [...prev, col]);
+                          } else {
+                            setSelectedColumns((prev) => prev.filter((c) => c !== col));
+                          }
+                        }}
+                        title="Concatenate and embed this column"
+                        className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-0 h-3.5 w-3.5"
+                      />
+                    </label>
+                    <label className="w-8 flex items-center justify-center shrink-0 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={isCited}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setCitationColumns((prev) => [...prev, col]);
+                          } else {
+                            setCitationColumns((prev) => prev.filter((c) => c !== col));
+                          }
+                        }}
+                        title="Use this column as the citation/source shown with answers"
+                        className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-0 h-3.5 w-3.5"
+                      />
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+            {selectedColumns.length === 0 && (
+              <p className="text-[11px] text-amber-400 mt-2 font-medium">
+                ⚠️ At least one field should be selected to produce searchable embeddings.
+              </p>
+            )}
+            {citationColumns.length === 0 && (
+              <p className="text-[11px] text-slate-500 mt-1">
+                No citation columns selected -- answers sourced from this file won't show an id or link.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Processing mode + Upload button row */}
         <div className="flex flex-wrap items-center justify-between gap-4 mt-5 pt-4 border-t border-slate-800/80">
           <div className="flex items-center gap-3">
@@ -260,7 +442,7 @@ export default function Ingest() {
           <button
             type="button"
             onClick={onUpload}
-            disabled={busy || !file}
+            disabled={busy || !file || (csvColumns.length > 0 && selectedColumns.length === 0)}
             className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 text-sm font-medium transition-all shadow-sm shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             <Sparkles className="h-4 w-4" />
@@ -375,6 +557,32 @@ export default function Ingest() {
                           Indexed {timeAgo(entry.created_at)}
                         </span>
                       </div>
+                      {entry.index_columns && entry.index_columns.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                          <span className="text-[10px] text-slate-500 font-medium">Fields:</span>
+                          {entry.index_columns.map((col) => (
+                            <span
+                              key={col}
+                              className="px-1.5 py-0.2 rounded bg-slate-800/80 text-blue-300/90 font-mono text-[10px] border border-slate-700/60"
+                            >
+                              {col}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {entry.citation_columns && entry.citation_columns.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                          <span className="text-[10px] text-slate-500 font-medium">Cited by:</span>
+                          {entry.citation_columns.map((col) => (
+                            <span
+                              key={col}
+                              className="px-1.5 py-0.2 rounded bg-slate-800/80 text-emerald-300/90 font-mono text-[10px] border border-slate-700/60"
+                            >
+                              {col}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 

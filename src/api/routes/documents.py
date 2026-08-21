@@ -89,6 +89,8 @@ def document_meta(file_id: str) -> dict:
         "created_at": entry["created_at"],
         "chunks": len(entry.get("chunk_ids") or []),
         "columns": columns,
+        "index_columns": entry.get("index_columns"),
+        "citation_columns": entry.get("citation_columns"),
     }
 
 
@@ -99,17 +101,22 @@ def document_units(
     limit: int = Query(50, ge=1, le=MAX_PAGE),
 ) -> list[dict]:
     """A window of the document, sliced by position."""
-    path, _ = _stored_path(file_id)
+    path, entry = _stored_path(file_id)
     with _guarded():
-        return [unit.to_dict() for unit in read_units(path, offset=offset, limit=limit)]
+        return [
+            unit.to_dict()
+            for unit in read_units(
+                path, offset=offset, limit=limit, citation_columns=entry.get("citation_columns")
+            )
+        ]
 
 
 @router.get("/{file_id}/units/{index}", response_model=UnitEntry)
 def document_unit(file_id: str, index: int) -> dict:
     """One unit, addressed the way a citation addresses it."""
-    path, _ = _stored_path(file_id)
+    path, entry = _stored_path(file_id)
     with _guarded():
-        unit = read_unit(path, index)
+        unit = read_unit(path, index, citation_columns=entry.get("citation_columns"))
     if unit is None:
         raise HTTPException(
             status_code=404, detail=f"this document has no {unit_kind(path)} {index}"

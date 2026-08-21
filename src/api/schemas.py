@@ -17,6 +17,9 @@ class Citation(BaseModel):
     unit_index: int | None = None
     label: str | None = None
     url: str | None = None
+    # Column name -> value for the columns designated as this citation's
+    # source (explicitly at ingest, or via the id/url name heuristics).
+    fields: dict[str, str] | None = None
 
 
 class QueryResponse(BaseModel):
@@ -59,6 +62,8 @@ class IngestFileEntry(BaseModel):
     size_bytes: int
     documents: int | None = None
     chunk_ids: list[str] | None = None
+    index_columns: list[str] | None = None
+    citation_columns: list[str] | None = None
 
 
 class DocumentMeta(BaseModel):
@@ -74,6 +79,8 @@ class DocumentMeta(BaseModel):
     chunks: int = 0
     # CSV header, when the viewer can render the document as a table.
     columns: list[str] | None = None
+    index_columns: list[str] | None = None
+    citation_columns: list[str] | None = None
 
 
 class UnitEntry(BaseModel):
@@ -85,6 +92,7 @@ class UnitEntry(BaseModel):
     label: str
     url: str | None = None
     key: str | None = None
+    fields: dict[str, str] | None = None
 
 
 class CompareRequest(BaseModel):
@@ -136,11 +144,13 @@ class BenchmarkTestFileEntry(BaseModel):
     id: str
     name: str
     filename: str
-    builtin: bool = False
     questions: int
     suite_type: str
     created_at: str | None = None
     size_bytes: int | None = None
+    question_col: str | None = None
+    answer_col: str | None = None
+    doc_index_col: str | None = None
 
 
 class PullModelRequest(BaseModel):

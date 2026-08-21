@@ -5,7 +5,7 @@ Wraps tests.benchmark.run_benchmark.run_all as a background job.
 
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from src.api.schemas import (
     BenchmarkRequest,
@@ -15,16 +15,12 @@ from src.api.schemas import (
     JobResponse,
 )
 from src.benchmark import files as benchmark_files
+from src.benchmark.runner import run_all
 from src.jobs.runner import ProgressReporter, runner
 from src.rag.graph import ask_compare, ask_direct
 from src.rag.model_catalog import list_installed
 
 router = APIRouter(prefix="/api/benchmark", tags=["benchmark"])
-
-try:
-    from tests.benchmark.run_benchmark import run_all
-except ImportError:  # pragma: no cover - exercised only if run_all is missing
-    run_all = None
 
 
 def _run_benchmark(body: BenchmarkRequest, test_paths: list[str] | None = None):
@@ -94,12 +90,17 @@ def compare(body: CompareRequest) -> dict:
 
 @router.get("/test-files", response_model=list[BenchmarkTestFileEntry])
 def list_test_files() -> list[dict]:
-    """List all available benchmark test suites, both built-in and user-uploaded."""
+    """List all available benchmark test suites."""
     return benchmark_files.list_test_files()
 
 
 @router.post("/test-files/upload", response_model=BenchmarkTestFileEntry, status_code=201)
-def upload_test_file(file: UploadFile = File(...)) -> dict:
+def upload_test_file(
+    file: UploadFile = File(...),
+    question_col: str | None = Form(None),
+    answer_col: str | None = Form(None),
+    doc_index_col: str | None = Form(None),
+) -> dict:
     """Upload a custom benchmark test CSV containing questions and optional answers/document indices."""
     original = Path(file.filename or "test_questions.csv").name
     if not original.lower().endswith(".csv"):
@@ -107,7 +108,13 @@ def upload_test_file(file: UploadFile = File(...)) -> dict:
 
     content = file.file.read()
     try:
-        entry = benchmark_files.save_uploaded_test_file(original, content)
+        entry = benchmark_files.save_uploaded_test_file(
+            original,
+            content,
+            question_col=question_col,
+            answer_col=answer_col,
+            doc_index_col=doc_index_col,
+        )
     except benchmark_files.UnusableTestFile as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -118,11 +125,11 @@ def upload_test_file(file: UploadFile = File(...)) -> dict:
 
 @router.delete("/test-files/{file_id}")
 def delete_test_file(file_id: str) -> dict:
-    """Delete an uploaded custom benchmark test suite."""
+    """Delete a benchmark test suite."""
     try:
-        deleted = benchmark_files.delete_uploaded_test_file(file_id)
+        deleted = benchmark_files.delete_test_file(file_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail="no such uploaded test file")
+        raise HTTPException(status_code=404, detail="no such test file")
     return {"id": deleted["id"], "filename": deleted["filename"]}
 
 
@@ -131,7 +138,7 @@ def start_benchmark(body: BenchmarkRequest) -> dict:
     if run_all is None:
         raise HTTPException(
             status_code=503,
-            detail="tests.benchmark.run_benchmark.run_all is not available yet",
+            detail="benchmark runner is not available",
         )
     installed = list_installed()
     if body.model not in installed:

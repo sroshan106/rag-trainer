@@ -21,6 +21,8 @@ def ingest(
     splitter: str = DEFAULT_SPLITTER,
     file_id: str | None = None,
     filename: str | None = None,
+    index_columns: list[str] | None = None,
+    citation_columns: list[str] | None = None,
 ) -> dict:
     """Load, split, and embed path, returning what was written.
 
@@ -33,7 +35,13 @@ def ingest(
             progress(fraction, message)
 
     report(0.05, f"loading {path}")
-    docs = load_documents(path, file_id=file_id, filename=filename)
+    docs = load_documents(
+        path,
+        file_id=file_id,
+        filename=filename,
+        index_columns=index_columns,
+        citation_columns=citation_columns,
+    )
 
     report(0.2, f"splitting {len(docs)} documents ({splitter})")
     chunks = split_documents(docs, splitter=splitter)
@@ -58,6 +66,8 @@ def ingest(
         "chunk_ids": chunk_ids,
         "splitter": splitter,
         "index_built": index_built,
+        "index_columns": index_columns,
+        "citation_columns": citation_columns,
     }
 
 

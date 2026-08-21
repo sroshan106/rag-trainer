@@ -66,3 +66,14 @@ def test_health():
 
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+def test_get_logs(monkeypatch):
+    from src.observability import logging as obs_logging
+    obs_logging.log("info", "test log entry", detail="unit test")
+
+    resp = client.get("/api/metrics/logs?limit=5")
+    assert resp.status_code == 200
+    entries = resp.json()
+    assert isinstance(entries, list)
+    assert any(e.get("message") == "test log entry" for e in entries)

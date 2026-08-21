@@ -39,7 +39,15 @@ def file_store(monkeypatch):
     def find_by_hash(sha256):
         return entries.get(sha256)
 
-    def record(filename, stored_path, sha256, size_bytes, documents=None):
+    def record(
+        filename,
+        stored_path,
+        sha256,
+        size_bytes,
+        documents=None,
+        index_columns=None,
+        **kwargs,
+    ):
         entries[sha256] = {
             "id": sha256,
             "created_at": "2026-08-19T12:00:00+00:00",
@@ -49,6 +57,7 @@ def file_store(monkeypatch):
             "size_bytes": size_bytes,
             "documents": documents,
             "chunk_ids": None,
+            "index_columns": index_columns,
         }
         return sha256
 
@@ -383,3 +392,26 @@ def test_benchmark_default_workers_matches_the_measured_value():
     from tests.benchmark.run_benchmark import DEFAULT_WORKERS
 
     assert schemas.BenchmarkRequest().workers == DEFAULT_WORKERS
+
+
+def test_upload_with_index_columns(client, monkeypatch, file_store):
+    called_with = {}
+
+    def fake_ingest(path, progress=None, splitter=None, file_id=None, filename=None, index_columns=None):
+        called_with["index_columns"] = index_columns
+        return {"path": path, "documents": 1, "chunks": 1, "chunk_ids": ["c1"], "index_built": True}
+
+    monkeypatch.setattr(ingest_route, "ingest", fake_ingest)
+
+    csv_data = "col1,col2,col3\nval1,val2,val3\n"
+    resp = client.post(
+        "/api/ingest/upload",
+        files={"file": ("custom.csv", csv_data, "text/csv")},
+        data={"index_columns": '["col1", "col3"]'},
+    )
+    assert resp.status_code == 202
+    _wait_idle()
+
+    assert called_with["index_columns"] == ["col1", "col3"]
+    record = client.get("/api/ingest/history").json()[0]
+    assert record["index_columns"] == ["col1", "col3"]

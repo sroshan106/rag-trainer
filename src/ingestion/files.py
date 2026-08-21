@@ -29,12 +29,38 @@ ingested_files = sa.Table(
     sa.Column("sha256", sa.String(64), nullable=False, unique=True, index=True),
     sa.Column("size_bytes", sa.Integer, nullable=False),
     sa.Column("documents", sa.Integer, nullable=True),
-    sa.Column("chunk_ids", JSONB, nullable=True),
+    sa.Column("chunk_ids", sa.JSON().with_variant(JSONB, "postgresql"), nullable=True),
+    sa.Column("index_columns", sa.JSON().with_variant(JSONB, "postgresql"), nullable=True),
+    sa.Column("citation_columns", sa.JSON().with_variant(JSONB, "postgresql"), nullable=True),
 )
+
+# Columns added after the table's initial release. Each gets an ALTER TABLE
+# fallback below so a pre-existing database picks it up without a migration.
+_ADDED_COLUMNS = ("index_columns", "citation_columns")
+
 
 def _create_table(engine: sa.Engine) -> None:
     """One-off setup the first time a given database is used."""
     _metadata.create_all(engine, tables=[ingested_files])
+    with engine.begin() as conn:
+        try:
+            if engine.dialect.name == "postgresql":
+                for name in _ADDED_COLUMNS:
+                    conn.execute(
+                        sa.text(f"ALTER TABLE ingested_files ADD COLUMN IF NOT EXISTS {name} JSONB")
+                    )
+            elif engine.dialect.name == "sqlite":
+                cols = [
+                    row[1]
+                    for row in conn.execute(sa.text("PRAGMA table_info(ingested_files)"))
+                ]
+                for name in _ADDED_COLUMNS:
+                    if name not in cols:
+                        conn.execute(
+                            sa.text(f"ALTER TABLE ingested_files ADD COLUMN {name} JSON")
+                        )
+        except Exception:
+            pass
 
 
 def _engine(connection: str | None = None) -> sa.Engine:
@@ -53,6 +79,18 @@ def _row_to_dict(row) -> dict:
     chunk_ids = row.chunk_ids
     if isinstance(chunk_ids, str):
         chunk_ids = json.loads(chunk_ids)
+    index_columns = getattr(row, "index_columns", None)
+    if isinstance(index_columns, str):
+        try:
+            index_columns = json.loads(index_columns)
+        except Exception:
+            pass
+    citation_columns = getattr(row, "citation_columns", None)
+    if isinstance(citation_columns, str):
+        try:
+            citation_columns = json.loads(citation_columns)
+        except Exception:
+            pass
     return {
         "id": row.id,
         "created_at": row.created_at.isoformat(),
@@ -62,6 +100,8 @@ def _row_to_dict(row) -> dict:
         "size_bytes": row.size_bytes,
         "documents": row.documents,
         "chunk_ids": chunk_ids,
+        "index_columns": index_columns,
+        "citation_columns": citation_columns,
     }
 
 
@@ -86,6 +126,8 @@ def record(
     sha256: str,
     size_bytes: int,
     documents: int | None = None,
+    index_columns: list[str] | None = None,
+    citation_columns: list[str] | None = None,
     connection: str | None = None,
 ) -> str | None:
     """Store one file's provenance. Returns its id, or None if not stored."""
@@ -101,6 +143,8 @@ def record(
                     sha256=sha256,
                     size_bytes=size_bytes,
                     documents=documents,
+                    index_columns=index_columns,
+                    citation_columns=citation_columns,
                 )
             )
     except Exception:  # noqa: BLE001 - provenance is auxiliary, never fatal

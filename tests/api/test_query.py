@@ -19,6 +19,7 @@ CITATION = {
     "unit_index": 42,
     "label": "row 42",
     "url": None,
+    "fields": None,
 }
 
 

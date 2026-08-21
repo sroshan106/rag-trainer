@@ -28,6 +28,9 @@ def _citation(doc) -> dict:
         # Only set when the source data carried a link of its own; the UI
         # prefers it over the stored copy when it is there.
         "url": metadata.get("url"),
+        # Values of the columns picked (or detected) as this row's citation
+        # source, e.g. {"id": "31776899", "source_url": "https://..."}.
+        "fields": metadata.get("citation_fields"),
     }
 
 
@@ -56,8 +59,14 @@ def format_citations(citations: list[dict]) -> str:
     """Render citations as a numbered block. Empty string when there are none."""
     if not citations:
         return ""
+    def _suffix(c: dict) -> str:
+        parts = [f"{k}: {v}" for k, v in (c.get("fields") or {}).items()]
+        if c["url"] and c["url"] not in (c.get("fields") or {}).values():
+            parts.append(c["url"])
+        return f" ({', '.join(parts)})" if parts else ""
+
     lines = [
-        f"  [{i}] {c['filename']} -- {c['label']}" + (f" ({c['url']})" if c["url"] else "")
+        f"  [{i}] {c['filename']} -- {c['label']}{_suffix(c)}"
         for i, c in enumerate(citations, start=1)
     ]
     return "sources:\n" + "\n".join(lines)

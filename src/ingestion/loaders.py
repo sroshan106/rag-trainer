@@ -22,6 +22,8 @@ def load_documents(
     path: str | Path,
     file_id: str | None = None,
     filename: str | None = None,
+    index_columns: list[str] | None = None,
+    citation_columns: list[str] | None = None,
 ) -> list[Document]:
     """Load ``path`` into Documents carrying their own provenance.
 
@@ -51,7 +53,13 @@ def load_documents(
                 # case a citation can point at the original document instead of
                 # our stored copy.
                 "url": unit.url,
+                "index_columns": index_columns,
+                # Values of the user-picked (or heuristically detected)
+                # citation source columns, e.g. {"id": "31776899"}.
+                "citation_fields": unit.fields,
             },
         )
-        for unit in iter_units(path)
+        for unit in iter_units(
+            path, index_columns=index_columns, citation_columns=citation_columns
+        )
     ]

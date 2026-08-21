@@ -10,7 +10,6 @@ import uuid
 
 logger = logging.getLogger("rag.benchmark.files")
 
-BUILTIN_DIR = Path("tests/benchmark/data")
 UPLOAD_DIR = Path("data/benchmark_uploads")
 MANIFEST_PATH = UPLOAD_DIR / "manifest.json"
 
@@ -31,7 +30,12 @@ def _find_column(fieldnames: list[str], aliases: tuple[str, ...]) -> str | None:
     return None
 
 
-def inspect_test_csv(file_content: str | bytes) -> dict:
+def inspect_test_csv(
+    file_content: str | bytes,
+    question_col: str | None = None,
+    answer_col: str | None = None,
+    doc_index_col: str | None = None,
+) -> dict:
     """Inspect CSV content and return metadata: questions count, suite_type, and column mapping."""
     if isinstance(file_content, bytes):
         try:
@@ -48,16 +52,37 @@ def inspect_test_csv(file_content: str | bytes) -> dict:
     if not reader.fieldnames:
         raise UnusableTestFile("The file contains no headers")
 
-    q_col = _find_column(reader.fieldnames, QUESTION_COLUMNS)
+    fieldnames = [f for f in reader.fieldnames if f is not None]
+
+    # Resolve question column
+    q_col = None
+    if question_col and question_col in fieldnames:
+        q_col = question_col
+    else:
+        q_col = _find_column(fieldnames, QUESTION_COLUMNS)
+
     if not q_col:
-        found = ", ".join(repr(f) for f in reader.fieldnames)
+        found = ", ".join(repr(f) for f in fieldnames)
         expected = ", ".join(QUESTION_COLUMNS)
         raise UnusableTestFile(
             f"No question column found (looked for one of: {expected}). Found columns: {found}"
         )
 
-    ans_col = _find_column(reader.fieldnames, ANSWER_COLUMNS)
-    doc_col = _find_column(reader.fieldnames, DOC_INDEX_COLUMNS)
+    # Resolve answer column
+    ans_col = None
+    if answer_col is not None:
+        if answer_col in fieldnames:
+            ans_col = answer_col
+    else:
+        ans_col = _find_column(fieldnames, ANSWER_COLUMNS)
+
+    # Resolve doc index column
+    doc_col = None
+    if doc_index_col is not None:
+        if doc_index_col in fieldnames:
+            doc_col = doc_index_col
+    else:
+        doc_col = _find_column(fieldnames, DOC_INDEX_COLUMNS)
 
     count = 0
     non_empty_answers = 0
@@ -101,45 +126,8 @@ def _save_manifest(entries: list[dict]) -> None:
         json.dump(entries, f, indent=2)
 
 
-def get_builtin_test_files() -> list[dict]:
-    """Return all built-in test files from tests/benchmark/data."""
-    results = []
-    if not BUILTIN_DIR.exists():
-        return results
-
-    builtin_names = [
-        "single_passage_answer_questions.csv",
-        "multi_passage_answer_questions.csv",
-        "no_answer_questions.csv",
-    ]
-
-    for name in builtin_names:
-        path = BUILTIN_DIR / name
-        if not path.exists():
-            continue
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                info = inspect_test_csv(f.read())
-            results.append(
-                {
-                    "id": name,
-                    "name": name,
-                    "filename": name,
-                    "builtin": True,
-                    "questions": info["questions"],
-                    "suite_type": info["suite_type"],
-                    "path": str(path),
-                    "size_bytes": path.stat().st_size,
-                }
-            )
-        except Exception:
-            logger.warning("Failed to inspect built-in test file %s", path, exc_info=True)
-
-    return results
-
-
 def get_uploaded_test_files() -> list[dict]:
-    """Return all uploaded custom test files."""
+    """Return all uploaded test files."""
     manifest = _load_manifest()
     valid_entries = []
     changed = False
@@ -158,17 +146,28 @@ def get_uploaded_test_files() -> list[dict]:
 
 
 def list_test_files() -> list[dict]:
-    """List all available benchmark test files (built-in + uploaded)."""
-    return get_builtin_test_files() + get_uploaded_test_files()
+    """List all available benchmark test files."""
+    return get_uploaded_test_files()
 
 
-def save_uploaded_test_file(filename: str, content: bytes) -> dict:
+def save_uploaded_test_file(
+    filename: str,
+    content: bytes,
+    question_col: str | None = None,
+    answer_col: str | None = None,
+    doc_index_col: str | None = None,
+) -> dict:
     """Validate and store an uploaded test CSV file."""
     clean_filename = Path(filename or "test_questions.csv").name
     if not clean_filename.lower().endswith(".csv"):
         clean_filename += ".csv"
 
-    info = inspect_test_csv(content)
+    info = inspect_test_csv(
+        content,
+        question_col=question_col,
+        answer_col=answer_col,
+        doc_index_col=doc_index_col,
+    )
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     file_id = uuid.uuid4().hex[:12]
@@ -181,12 +180,14 @@ def save_uploaded_test_file(filename: str, content: bytes) -> dict:
         "id": file_id,
         "name": clean_filename,
         "filename": clean_filename,
-        "builtin": False,
         "questions": info["questions"],
         "suite_type": info["suite_type"],
         "created_at": datetime.now(timezone.utc).isoformat(),
         "size_bytes": len(content),
         "stored_path": str(target_path),
+        "question_col": info["question_col"],
+        "answer_col": info["answer_col"],
+        "doc_index_col": info["doc_index_col"],
     }
 
     manifest = _load_manifest()
@@ -196,24 +197,44 @@ def save_uploaded_test_file(filename: str, content: bytes) -> dict:
     return entry
 
 
-def delete_uploaded_test_file(file_id: str) -> dict:
-    """Delete an uploaded custom test file by its ID."""
+def get_test_file_entry(file_id_or_name_or_path: str) -> dict | None:
+    """Get metadata for a test file."""
+    manifest = _load_manifest()
+    target_str = str(file_id_or_name_or_path)
+    for entry in manifest:
+        if (
+            entry.get("id") == target_str
+            or entry.get("filename") == target_str
+            or entry.get("stored_path") == target_str
+            or Path(entry.get("stored_path", "")).name == target_str
+        ):
+            return entry
+
+    return None
+
+
+def delete_test_file(file_id: str) -> dict:
+    """Delete a test suite by its ID or filename."""
     manifest = _load_manifest()
     found_idx = -1
     for idx, entry in enumerate(manifest):
-        if entry["id"] == file_id:
+        if entry["id"] == file_id or entry.get("filename") == file_id:
             found_idx = idx
             break
 
     if found_idx == -1:
-        raise KeyError(f"No custom test file found with id {file_id!r}")
+        raise KeyError(f"No test file found with id {file_id!r}")
 
     entry = manifest.pop(found_idx)
     stored_path = Path(entry.get("stored_path", ""))
     stored_path.unlink(missing_ok=True)
     _save_manifest(manifest)
-
     return entry
+
+
+def delete_uploaded_test_file(file_id: str) -> dict:
+    """Delete an uploaded test file by its ID."""
+    return delete_test_file(file_id)
 
 
 def resolve_test_file_path(file_id_or_name: str) -> Path:
@@ -222,11 +243,6 @@ def resolve_test_file_path(file_id_or_name: str) -> Path:
     candidate = Path(file_id_or_name)
     if candidate.is_file():
         return candidate
-
-    # Check built-ins
-    builtin_candidate = BUILTIN_DIR / file_id_or_name
-    if builtin_candidate.is_file():
-        return builtin_candidate
 
     # Check uploads by id or filename
     manifest = _load_manifest()

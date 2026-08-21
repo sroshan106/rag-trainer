@@ -11,6 +11,13 @@ import {
   GitCompare,
   Clock,
   Zap,
+  Plus,
+  Trash2,
+  UploadCloud,
+  FileSpreadsheet,
+  Check,
+  X,
+  Layers,
 } from "lucide-react";
 
 import Card from "../components/Card.jsx";
@@ -24,7 +31,50 @@ import {
   cancelJob,
   pollJob,
   compareQuery,
+  getBenchmarkTestFiles,
+  uploadBenchmarkTestFile,
+  deleteBenchmarkTestFile,
 } from "../api.js";
+
+const QUESTION_ALIASES = ["question", "query", "prompt", "q", "question_text"];
+const ANSWER_ALIASES = ["answer", "ground_truth", "reference", "expected", "target", "a", "expected_answer"];
+const DOC_INDEX_ALIASES = ["document_index", "doc_index", "doc_id", "index", "document_id"];
+
+function findMatchingHeader(headers, aliases) {
+  const lowered = headers.map((h) => h.trim().toLowerCase());
+  for (const alias of aliases) {
+    const idx = lowered.indexOf(alias);
+    if (idx !== -1) return headers[idx];
+  }
+  return "";
+}
+
+function parseCsvHeaders(text) {
+  if (!text) return [];
+  const firstLine = text.split(/\r?\n/)[0];
+  if (!firstLine) return [];
+  const columns = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < firstLine.length; i++) {
+    const char = firstLine[i];
+    if (char === '"') {
+      if (inQuotes && firstLine[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      columns.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  columns.push(current.trim());
+  return columns.filter((c) => c.length > 0);
+}
 
 export default function Benchmark() {
   const [workers, setWorkers] = useState(4);
@@ -40,6 +90,19 @@ export default function Benchmark() {
   const [stopping, setStopping] = useState(false);
   const [expandedIds, setExpandedIds] = useState(new Set());
   const cancelledRef = useRef(false);
+
+  const [testSuites, setTestSuites] = useState([]);
+  const [selectedSuites, setSelectedSuites] = useState([]);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadHeaders, setUploadHeaders] = useState([]);
+  const [questionCol, setQuestionCol] = useState("");
+  const [answerCol, setAnswerCol] = useState("");
+  const [docIndexCol, setDocIndexCol] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
+  const [deletingSuiteId, setDeletingSuiteId] = useState(null);
+  const uploadFileInputRef = useRef(null);
 
   const [compareText, setCompareText] = useState("");
   const [compareModel, setCompareModel] = useState("");
@@ -104,6 +167,81 @@ export default function Benchmark() {
     };
   }, []);
 
+  const loadTestSuites = () => {
+    getBenchmarkTestFiles()
+      .then((suites) => {
+        setTestSuites(suites);
+        setSelectedSuites(suites.map((s) => s.id));
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    loadTestSuites();
+  }, []);
+
+  function handleUploadFileChange(e) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setUploadFile(f);
+    setUploadError(null);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result || "";
+      const headers = parseCsvHeaders(content);
+      setUploadHeaders(headers);
+      setQuestionCol(findMatchingHeader(headers, QUESTION_ALIASES) || headers[0] || "");
+      setAnswerCol(findMatchingHeader(headers, ANSWER_ALIASES) || "");
+      setDocIndexCol(findMatchingHeader(headers, DOC_INDEX_ALIASES) || "");
+    };
+    reader.readAsText(f.slice(0, 65536));
+  }
+
+  async function onSaveCustomSuite(e) {
+    e.preventDefault();
+    if (!uploadFile || !questionCol) {
+      setUploadError("Please select a file and a question column");
+      return;
+    }
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const created = await uploadBenchmarkTestFile(uploadFile, {
+        question_col: questionCol,
+        answer_col: answerCol || null,
+        doc_index_col: docIndexCol || null,
+      });
+      setShowUploadModal(false);
+      setUploadFile(null);
+      setUploadHeaders([]);
+      setQuestionCol("");
+      setAnswerCol("");
+      setDocIndexCol("");
+      getBenchmarkTestFiles().then((suites) => {
+        setTestSuites(suites);
+        setSelectedSuites((prev) => [...prev, created.id]);
+      });
+    } catch (err) {
+      setUploadError(err.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function onDeleteSuite(id) {
+    if (!window.confirm("Delete this benchmark test suite?")) return;
+    setDeletingSuiteId(id);
+    try {
+      await deleteBenchmarkTestFile(id);
+      setTestSuites((prev) => prev.filter((s) => s.id !== id));
+      setSelectedSuites((prev) => prev.filter((sid) => sid !== id));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeletingSuiteId(null);
+    }
+  }
+
   async function onStart() {
     setError(null);
     setStopping(false);
@@ -115,6 +253,7 @@ export default function Benchmark() {
         use_cache: useCache,
         chunk_size: Number(chunkSize) || 10,
         model: model || null,
+        test_files: selectedSuites.length > 0 ? selectedSuites : null,
       });
       setJob(started);
       await pollJob(started.id, {
@@ -296,7 +435,7 @@ export default function Benchmark() {
           <div className="flex items-center gap-2">
             <button
               onClick={onStart}
-              disabled={running || !model}
+              disabled={running || !model || testSuites.length === 0 || selectedSuites.length === 0}
               className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 text-sm font-medium transition-all shadow-sm shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               <Play className="h-4 w-4" />
@@ -315,6 +454,281 @@ export default function Benchmark() {
           </div>
         </div>
       </div>
+
+      {/* Test Suites Management Card */}
+      <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800/80">
+          <div className="flex items-center gap-2">
+            <Layers className="h-4 w-4 text-blue-400" />
+            <span className="text-sm font-semibold text-slate-200">Evaluation Test Suites</span>
+            <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-blue-950/60 text-blue-300 border border-blue-800/60">
+              {selectedSuites.length} of {testSuites.length} selected
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedSuites(testSuites.map((s) => s.id))}
+              className="px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+            >
+              Select All
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedSuites([])}
+              className="px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-400 text-xs font-medium transition-colors"
+            >
+              Deselect All
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowUploadModal(true);
+                setUploadError(null);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors shadow-sm"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Upload Custom Suite</span>
+            </button>
+          </div>
+        </div>
+
+        {testSuites.length === 0 ? (
+          <div className="py-8 text-center text-xs text-slate-500">
+            No test suites available. Click "Upload Custom Suite" to add a CSV test set.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {testSuites.map((suite) => {
+              const isSelected = selectedSuites.includes(suite.id);
+              const isDeleting = deletingSuiteId === suite.id;
+
+              return (
+                <div
+                  key={suite.id}
+                  className={`flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl border transition-all ${
+                    isSelected
+                      ? "border-slate-700/80 bg-slate-900/60"
+                      : "border-slate-800/60 bg-slate-900/20 opacity-75"
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      disabled={running}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedSuites((prev) => [...prev, suite.id]);
+                        } else {
+                          setSelectedSuites((prev) => prev.filter((id) => id !== suite.id));
+                        }
+                      }}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-0 h-4 w-4 cursor-pointer"
+                    />
+
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-800/80 border border-slate-700/60 text-slate-300">
+                      <FileSpreadsheet className="h-4 w-4" />
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-xs text-slate-200 truncate">
+                          {suite.name}
+                        </span>
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-medium border bg-indigo-950/70 text-indigo-300 border-indigo-800/60 capitalize">
+                          {suite.suite_type.replace("_", " ")}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-slate-400 mt-0.5">
+                        <span>{suite.questions} questions</span>
+                        {suite.question_col && (
+                          <>
+                            <span>•</span>
+                            <span className="text-slate-500 font-mono text-[10px]">
+                              Q: <span className="text-slate-300">{suite.question_col}</span>
+                              {suite.answer_col && (
+                                <> | A: <span className="text-slate-300">{suite.answer_col}</span></>
+                              )}
+                              {suite.doc_index_col && (
+                                <> | Doc: <span className="text-slate-300">{suite.doc_index_col}</span></>
+                              )}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={running || isDeleting}
+                    onClick={() => onDeleteSuite(suite.id)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 transition-colors"
+                    title="Delete test suite"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Upload Custom Suite Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="relative w-full max-w-lg rounded-2xl border border-slate-700/80 bg-[#111726] p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="h-5 w-5 text-blue-400" />
+                <h3 className="text-sm font-bold text-slate-100">Upload Benchmark Test Suite</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUploadModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {uploadError && (
+              <div className="mt-4 rounded-xl border border-rose-800/80 bg-rose-950/40 p-3 text-xs text-rose-300 flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
+                <div>{uploadError}</div>
+              </div>
+            )}
+
+            <form onSubmit={onSaveCustomSuite} className="mt-4 flex flex-col gap-4">
+              {/* File Drop / Select Area */}
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1.5">
+                  Select CSV File
+                </label>
+                <input
+                  ref={uploadFileInputRef}
+                  type="file"
+                  accept=".csv"
+                  onChange={handleUploadFileChange}
+                  className="hidden"
+                />
+                <div
+                  onClick={() => uploadFileInputRef.current?.click()}
+                  className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-900/40 hover:bg-slate-900/70 p-4 cursor-pointer transition-colors"
+                >
+                  <UploadCloud className="h-6 w-6 text-slate-400 mb-1" />
+                  <p className="text-xs font-medium text-slate-200">
+                    {uploadFile ? uploadFile.name : "Click to select benchmark CSV"}
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    {uploadFile ? `${uploadHeaders.length} columns detected` : "CSV format up to 50MB"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Column Mapping Section */}
+              {uploadHeaders.length > 0 && (
+                <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 flex flex-col gap-3">
+                  <span className="text-xs font-semibold text-slate-200">Column Matching</span>
+                  <p className="text-[11px] text-slate-400">
+                    Map CSV headers to benchmark question and answer fields.
+                  </p>
+
+                  <Field label="Question Column (Required)">
+                    <div className="relative">
+                      <select
+                        value={questionCol}
+                        onChange={(e) => setQuestionCol(e.target.value)}
+                        required
+                        className="w-full appearance-none rounded-lg border border-slate-700/80 bg-slate-900 text-slate-200 px-3 py-1.5 pr-8 text-xs font-mono focus:outline-none focus:border-blue-500 cursor-pointer"
+                      >
+                        {uploadHeaders.map((h) => (
+                          <option key={h} value={h}>
+                            {h}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+                        <span className="text-[10px]">▼</span>
+                      </div>
+                    </div>
+                  </Field>
+
+                  <Field label="Answer Column (Optional - for ground truth answer scoring)">
+                    <div className="relative">
+                      <select
+                        value={answerCol}
+                        onChange={(e) => setAnswerCol(e.target.value)}
+                        className="w-full appearance-none rounded-lg border border-slate-700/80 bg-slate-900 text-slate-200 px-3 py-1.5 pr-8 text-xs font-mono focus:outline-none focus:border-blue-500 cursor-pointer"
+                      >
+                        <option value="">(None - No Answer / Refusal evaluation)</option>
+                        {uploadHeaders.map((h) => (
+                          <option key={h} value={h}>
+                            {h}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+                        <span className="text-[10px]">▼</span>
+                      </div>
+                    </div>
+                  </Field>
+
+                  <Field label="Document Identifier / Index Column (Optional - for recall@k scoring)">
+                    <div className="relative">
+                      <select
+                        value={docIndexCol}
+                        onChange={(e) => setDocIndexCol(e.target.value)}
+                        className="w-full appearance-none rounded-lg border border-slate-700/80 bg-slate-900 text-slate-200 px-3 py-1.5 pr-8 text-xs font-mono focus:outline-none focus:border-blue-500 cursor-pointer"
+                      >
+                        <option value="">(None)</option>
+                        {uploadHeaders.map((h) => (
+                          <option key={h} value={h}>
+                            {h}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+                        <span className="text-[10px]">▼</span>
+                      </div>
+                    </div>
+                  </Field>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowUploadModal(false)}
+                  disabled={uploading}
+                  className="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={uploading || !uploadFile || !questionCol}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {uploading ? (
+                    <span>Uploading...</span>
+                  ) : (
+                    <>
+                      <Check className="h-3.5 w-3.5" />
+                      <span>Save & Add Suite</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-xl border border-rose-800/80 bg-rose-950/40 p-4 text-sm text-rose-300 flex items-start gap-3">
@@ -552,9 +966,7 @@ function formatMetricsSummary(result) {
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
       {suitesWithData.map((r) => {
         const shortName = r.name
-          .replace("_passage_answer_questions.csv", "")
-          .replace("_answer_questions.csv", "")
-          .replace(".csv", "")
+          .replace(/\.csv$/i, "")
           .replace(/_/g, " ");
 
         const metricEntries = Object.entries(r).filter(([k]) => k !== "name" && k !== "n");

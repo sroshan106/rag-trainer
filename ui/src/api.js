@@ -62,10 +62,16 @@ export const activeIngest = () => request("/ingest/active");
 export const ingestHistory = () => request("/ingest/history");
 export const deleteIngestedFile = (id) => del(`/ingest/files/${id}`);
 
-export function uploadAndIngest(file, splitter = null) {
+export function uploadAndIngest(file, splitter = null, indexColumns = null, citationColumns = null) {
   const form = new FormData();
   form.append("file", file);
   if (splitter) form.append("splitter", splitter);
+  if (indexColumns && indexColumns.length > 0) {
+    form.append("index_columns", JSON.stringify(indexColumns));
+  }
+  if (citationColumns && citationColumns.length > 0) {
+    form.append("citation_columns", JSON.stringify(citationColumns));
+  }
   return postForm("/ingest/upload", form);
 }
 
@@ -88,9 +94,12 @@ export const benchmarkModels = () => request("/benchmark/models");
 export const compareQuery = (query, model = null) => postJson("/benchmark/compare", { query, model });
 export const getBenchmarkTestFiles = () => request("/benchmark/test-files");
 
-export function uploadBenchmarkTestFile(file) {
+export function uploadBenchmarkTestFile(file, mappings = {}) {
   const form = new FormData();
   form.append("file", file);
+  if (mappings.question_col) form.append("question_col", mappings.question_col);
+  if (mappings.answer_col) form.append("answer_col", mappings.answer_col);
+  if (mappings.doc_index_col) form.append("doc_index_col", mappings.doc_index_col);
   return postForm("/benchmark/test-files/upload", form);
 }
 

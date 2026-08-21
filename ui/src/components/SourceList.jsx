@@ -67,12 +67,15 @@ export default function SourceList({ citations, sources, title = "Sources", comp
             );
           }
 
+          const fieldEntries = Object.entries(entry.fields || {});
+          const fieldSummary = fieldEntries.map(([k, v]) => `${k}: ${v}`).join(", ");
+
           return (
             <button
               key={entry.key}
               type="button"
               onClick={() => setOpen(entry)}
-              title={`${entry.filename} — ${entry.label}`}
+              title={[`${entry.filename} — ${entry.label}`, fieldSummary].filter(Boolean).join("\n")}
               className={`${chip} text-slate-300 hover:text-white hover:bg-slate-800 hover:border-slate-700 cursor-pointer`}
             >
               {number}
@@ -80,6 +83,11 @@ export default function SourceList({ citations, sources, title = "Sources", comp
               <span className="shrink-0 font-mono text-[10px] text-blue-400">
                 {entry.label}
               </span>
+              {fieldEntries.length > 0 && (
+                <span className="shrink-0 font-mono text-[10px] text-emerald-400 truncate max-w-[10rem]">
+                  {fieldSummary}
+                </span>
+              )}
             </button>
           );
         })}

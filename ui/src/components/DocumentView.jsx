@@ -24,7 +24,15 @@ function Unit({ unit, highlighted }) {
           {unit.label}
         </span>
         <div className="flex items-center gap-2 shrink-0">
-          {unit.key && (
+          {unit.fields &&
+            Object.entries(unit.fields).map(([field, value]) =>
+              value === unit.url ? null : (
+                <span key={field} className="text-[11px] font-mono text-slate-500" title={field}>
+                  {field}: {value}
+                </span>
+              )
+            )}
+          {!unit.fields && unit.key && (
             <span className="text-[11px] font-mono text-slate-500" title="Dataset identifier">
               id {unit.key}
             </span>
@@ -158,6 +166,32 @@ export default function DocumentView({ fileId, focusIndex = null, compact = fals
               <span>•</span>
               <span>{formatBytes(meta.size_bytes)}</span>
             </div>
+            {meta.index_columns && meta.index_columns.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                <span className="text-[11px] text-slate-400 font-medium">Indexed fields:</span>
+                {meta.index_columns.map((col) => (
+                  <span
+                    key={col}
+                    className="px-2 py-0.5 rounded-md bg-blue-950/60 text-blue-300 font-mono text-[11px] border border-blue-800/60"
+                  >
+                    {col}
+                  </span>
+                ))}
+              </div>
+            )}
+            {meta.citation_columns && meta.citation_columns.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                <span className="text-[11px] text-slate-400 font-medium">Cited by:</span>
+                {meta.citation_columns.map((col) => (
+                  <span
+                    key={col}
+                    className="px-2 py-0.5 rounded-md bg-emerald-950/60 text-emerald-300 font-mono text-[11px] border border-emerald-800/60"
+                  >
+                    {col}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
