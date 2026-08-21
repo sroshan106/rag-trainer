@@ -11,6 +11,7 @@ import {
   Clock,
   Sparkles,
   Eye,
+  X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import Card from "../components/Card.jsx";
@@ -22,6 +23,7 @@ import {
   ingestSplitters,
   deleteIngestedFile,
   pollJob,
+  cancelJob,
 } from "../api.js";
 
 const BUSY_STATUSES = ["pending", "running"];
@@ -189,6 +191,12 @@ export default function Ingest() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function onCancelIngest() {
+    if (!job) return;
+    setError(null);
+    cancelJob(job.id).catch((err) => setError(err.message));
   }
 
   async function onDelete(entry) {
@@ -466,9 +474,22 @@ export default function Ingest() {
               <StatusBadge status={job.status} />
               <span className="text-xs font-medium text-ink-2">{job.message}</span>
             </div>
-            <span className="text-xs font-mono font-semibold text-accent">
-              {Math.round((job.progress ?? 0) * 100)}%
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono font-semibold text-accent">
+                {Math.round((job.progress ?? 0) * 100)}%
+              </span>
+              {BUSY_STATUSES.includes(job.status) && (
+                <button
+                  type="button"
+                  onClick={onCancelIngest}
+                  title="Cancel ingestion"
+                  className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg text-rose-700 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-all cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5 text-rose-700" />
+                  <span>Cancel</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="h-2 w-full rounded-full bg-surface-2 overflow-hidden">

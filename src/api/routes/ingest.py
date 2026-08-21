@@ -46,11 +46,16 @@ def _ingest_job(
         if citation_columns is not None:
             ingest_kwargs["citation_columns"] = citation_columns
 
+        def report(fraction: float, message: str) -> None:
+            # Checked on every progress tick (each embedding batch included) so
+            # a cancel takes effect within one batch instead of only after the
+            # whole ingest -- previously it just relabeled the finished job.
+            reporter.raise_if_cancelled()
+            reporter.update(progress=fraction, message=message)
+
         result = ingest(
             path,
-            progress=lambda fraction, message: reporter.update(
-                progress=fraction, message=message
-            ),
+            progress=report,
             splitter=splitter,
             file_id=file_record_id,
             filename=filename,

@@ -14,7 +14,7 @@ import {
   Loader2,
 } from "lucide-react";
 import StatusBadge from "../components/StatusBadge.jsx";
-import { listModelCatalog, pullModel, pullHistory, pollJob, deleteModel } from "../api.js";
+import { listModelCatalog, pullModel, pullHistory, pollJob, deleteModel, cancelJob } from "../api.js";
 
 const DEFAULT_MODEL_METADATA = {
   "llama3.2:3b": {
@@ -175,6 +175,13 @@ export default function Settings() {
       .catch((err) => setError(err.message));
   }
 
+  function cancelDownload(model) {
+    const job = jobs[model];
+    if (!job) return;
+    setError(null);
+    cancelJob(job.id).catch((err) => setError(err.message));
+  }
+
   async function confirmDelete(model) {
     setError(null);
     setDeletingModel(model);
@@ -267,6 +274,7 @@ export default function Settings() {
               infoMap={infoMap}
               job={(m) => jobs[m]}
               onDownload={download}
+              onCancel={cancelDownload}
               onDeleteRequest={(row, info) => setModelToDelete({ name: row.name, active: row.active, info })}
               deletingModel={deletingModel}
             />
@@ -396,7 +404,7 @@ function EmbedInfoPanel({ model, info }) {
   );
 }
 
-function ModelTable({ rows, infoMap, job, onDownload, onDeleteRequest, deletingModel }) {
+function ModelTable({ rows, infoMap, job, onDownload, onCancel, onDeleteRequest, deletingModel }) {
   if (!rows) return <div className="py-8 text-center text-xs text-ink-4">Loading catalog...</div>;
   return (
     <div className="flex flex-col divide-y divide-hairline">
@@ -407,6 +415,7 @@ function ModelTable({ rows, infoMap, job, onDownload, onDeleteRequest, deletingM
           info={infoMap?.[row.name]}
           job={job(row.name)}
           onDownload={onDownload}
+          onCancel={onCancel}
           onDeleteRequest={onDeleteRequest}
           deletingModel={deletingModel}
         />
@@ -415,7 +424,7 @@ function ModelTable({ rows, infoMap, job, onDownload, onDeleteRequest, deletingM
   );
 }
 
-function ModelRow({ row, info, job, onDownload, onDeleteRequest, deletingModel }) {
+function ModelRow({ row, info, job, onDownload, onCancel, onDeleteRequest, deletingModel }) {
   const busy = job && ["pending", "running"].includes(job.status);
   const minVram = info?.min_vram;
   const diskSize = info?.disk_size;
@@ -501,15 +510,28 @@ function ModelRow({ row, info, job, onDownload, onDeleteRequest, deletingModel }
             </button>
           </div>
         ) : (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onDownload(row.name)}
-            className="inline-flex items-center gap-1.5 text-xs font-medium px-4 py-2 rounded-lg bg-accent hover:bg-accent-strong text-white transition-all shadow-sm shadow-accent/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            <DownloadCloud className="h-3.5 w-3.5" />
-            <span>{busy ? "Downloading..." : "Download"}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onDownload(row.name)}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-4 py-2 rounded-lg bg-accent hover:bg-accent-strong text-white transition-all shadow-sm shadow-accent/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <DownloadCloud className="h-3.5 w-3.5" />
+              <span>{busy ? "Downloading..." : "Download"}</span>
+            </button>
+            {busy && (
+              <button
+                type="button"
+                onClick={() => onCancel?.(row.name)}
+                title="Cancel download"
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-2 rounded-lg text-rose-700 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-all cursor-pointer shadow-sm"
+              >
+                <X className="h-3.5 w-3.5 text-rose-700" />
+                <span>Cancel</span>
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

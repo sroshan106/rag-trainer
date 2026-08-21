@@ -203,9 +203,9 @@ def score_answerable(
     recalls = []
     if has_doc_index:
         for row, result in zip(rows, results):
-            doc_idx = str(row.get("document_index", ""))
+            gold_ids = set(re.findall(r"\d+", str(row.get("document_index", ""))))
             retrieved = set(result.get("retrieved_indices", []))
-            recalls.append(1.0 if doc_idx and doc_idx in retrieved else 0.0)
+            recalls.append(1.0 if gold_ids and gold_ids & retrieved else 0.0)
 
     overlaps = [
         _answer_overlap(row.get("answer", ""), result.get("answer", ""))
