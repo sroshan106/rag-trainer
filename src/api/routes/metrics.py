@@ -1,11 +1,10 @@
-"""The System view's backing route: one-shot metrics plus a 1Hz SSE stream."""
-
 import asyncio
 import json
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
+from src.observability.logging import tail
 from src.observability.sysmetrics import collect_all
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
@@ -16,6 +15,16 @@ STREAM_INTERVAL_SECONDS = 1.0
 @router.get("")
 def get_metrics() -> dict:
     return collect_all()
+
+
+@router.get("/logs")
+def get_logs(
+    limit: int = Query(default=100, ge=1, le=1000),
+    level: str | None = None,
+    q: str | None = None,
+) -> list[dict]:
+    """Return recent in-memory log entries from the ring buffer."""
+    return tail(limit=limit, level=level, query=q)
 
 
 async def frame_generator(request: Request):

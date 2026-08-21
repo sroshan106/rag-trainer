@@ -1,46 +1,57 @@
 # Architecture
 
-A local-only retrieval-augmented generation system. Nothing leaves the machine: Postgres (pgvector) stores the chunks and their embeddings, Ollama serves both the embedding model and the chat model, and a FastAPI service wires them together behind a React dashboard.
+A local-only retrieval-augmented generation system. Nothing leaves the machine: Postgres (pgvector) stores the chunks, embeddings, and full-text search indexes; Ollama serves both the embedding model and the chat model; a Cross-Encoder provides precision reranking; and a FastAPI service coordinates them behind a React dashboard.
+
+---
 
 ## 1. Why it runs entirely locally
 
-Every component — the LLM, the embedding model, the vector database — runs in a container on this machine. No document text and no query ever leaves the host, there is no per-token cost, and the whole stack comes up with one `docker compose up`.
+Every component — the LLM, the embedding model, the cross-encoder reranker, and the vector database — runs on the host machine. No document text and no query ever leaves the host, there is no per-token cost, and the entire stack boots with `docker compose up`.
 
-The tradeoff is quality and speed: `llama3.2:3b` is a small model chosen to fit inside the 4GB of VRAM on a GTX 1050. Swapping to a hosted API later means changing one `ChatOllama(...)` construction.
+The tradeoff is compute and memory management: small models like `llama3.2:3b` and `qwen3:4b` are chosen to operate within a **4GB VRAM GPU** (e.g., GTX 1050). Swapping to a hosted API later requires changing only the `ChatOllama` LLM client adapter.
+
+---
 
 ## 2. The Pieces
 
-- **Ollama:** Serves two models over HTTP: `llama3.2:3b` generates answers, and `nomic-embed-text` turns text into vectors. Uses GPU passthrough.
-- **Postgres + pgvector:** Stores document chunks alongside vectors and answers nearest-neighbour queries. Also holds a `tsvector` column + GIN index for lexical search.
-- **LangChain & LangGraph:** LangChain supplies the adapters (OllamaEmbeddings, PGVector, loaders). LangGraph orchestrates control flow as an explicit state graph (retrieve → grade → generate).
+- **Ollama:** Serves local models over HTTP: chat generation (`llama3.2:3b`, `qwen3:4b`, `gemma2:2b`, `phi3.5`) and text embeddings (`nomic-embed-text`, 768 dimensions).
+- **Postgres + pgvector:** Stores document chunks, relational metadata, and embeddings for vector similarity queries. Also maintains a generated stored `tsvector` column and GIN index for lexical search.
+- **Cross-Encoder Reranker:** Hugging Face `cross-encoder/ms-marco-MiniLM-L-6-v2` running on CPU via `sentence_transformers` to rerank fused candidate passages without consuming GPU VRAM.
+- **LangChain & LangGraph:** LangChain supplies adapters (`OllamaEmbeddings`, `PGVector`, text splitters, loaders). LangGraph orchestrates the state machine workflow (`retrieve` → `grade` → `generate` → `END`).
+- **Background Job Runner:** In-process threaded registry for long-running ingestion, benchmark evaluation, and model downloads with cooperative cancellation.
+
+---
 
 ## 3. The Four Layers
 
 ```mermaid
 flowchart TB
-    subgraph L4["Interface"]
-        UI["ui/ — React dashboard<br/>(Ask, Ingest, Benchmark, System, Settings)"]
-        CLI["CLI entrypoints<br/>src.rag.graph · src.ingestion.pipeline"]
+    subgraph L4["Interface Layer"]
+        UI["ui/ — React 19 Dashboard<br/>(Ask, Ingest, Document Viewer, Benchmark, System, Settings)"]
+        CLI["CLI Entrypoints<br/>src.rag.graph · src.ingestion.pipeline"]
     end
 
-    subgraph L3["HTTP"]
-        API["src/api — routers, Pydantic schemas<br/>HTTP mapping only"]
-        JOBS["src/jobs — background job runner<br/>thread-per-job, cooperative cancel"]
+    subgraph L3["HTTP & Execution Layer"]
+        API["src/api — routers & Pydantic schemas<br/>(query, ingest, documents, benchmark, metrics, models, jobs)"]
+        JOBS["src/jobs — background job runner<br/>thread-per-job, cooperative cancellation, progress reporting"]
     end
 
-    subgraph L2["Domain"]
+    subgraph L2["Domain Layer"]
         RAG["src/rag — graph, nodes, prompts,<br/>citations, history, model catalog"]
-        ING["src/ingestion — loaders, splitter,<br/>pipeline, file provenance"]
+        ING["src/ingestion — units, loaders, splitter,<br/>pipeline, file provenance"]
+        BENCH["src/benchmark — test suites,<br/>custom upload inspector & manifest"]
     end
 
-    subgraph L1["Infrastructure"]
-        VS["src/vectorstore — pgvector, lexical,<br/>hybrid fusion, reranker"]
-        OBS["src/observability — tracing,<br/>JSON logging, system metrics"]
-        CFG["src/config.py — env access"]
+    subgraph L1["Infrastructure Layer"]
+        VS["src/vectorstore — pgvector, lexical,<br/>RRF hybrid fusion, reranker"]
+        OBS["src/observability — tracing spans,<br/>JSON logging ring buffer, sysmetrics"]
+        DB["src/db/engine.py — pooled engine cache"]
+        CFG["src/config.py — env flags"]
     end
 
-    PG[("Postgres + pgvector")]
-    OLL[["Ollama<br/>embed + chat, GPU"]]
+    PG[("Postgres + pgvector<br/>embeddings, GIN index, history")]
+    OLL[["Ollama<br/>embed + chat models"]]
+    HF[["PyTorch / HuggingFace<br/>cross-encoder reranker"]]
 
     UI --> API
     CLI --> RAG
@@ -48,119 +59,154 @@ flowchart TB
     API --> JOBS
     API --> RAG
     API --> ING
+    API --> BENCH
     JOBS --> ING
+    JOBS --> BENCH
+    JOBS --> RAG
     RAG --> VS
     ING --> VS
-    VS --> PG
-    RAG --> OLL
+    BENCH --> RAG
+    VS --> DB
+    RAG --> DB
+    ING --> DB
+    DB --> PG
     VS --> OLL
+    RAG --> OLL
+    VS --> HF
     RAG --> OBS
     API --> OBS
 
     classDef store fill:#1f6feb22,stroke:#1f6feb
-    class PG,OLL store
+    class PG,OLL,HF store
 ```
 
-**The rule that keeps this honest:** arrows only point downward.
+**The rule that keeps this honest:** dependencies only point downward.
+
+---
 
 ## 4. Answering a Query
 
-`ask()` and `ask_stream()` in `src/rag/graph.py` walk three nodes.
+`ask()`, `ask_stream()`, and `ask_compare()` in `src/rag/graph.py` execute through the LangGraph workflow:
 
 ```mermaid
 flowchart TD
-    Q["query + model"] --> RESOLVE{"model in<br/>AVAILABLE_MODELS?"}
-    RESOLVE -->|no| ERR["ValueError — no default model"]
-    RESOLVE -->|yes| HIST[("history.start()<br/>write pending row")]
+    Q["Query + Model"] --> RESOLVE{"Model in<br/>installed list?"}
+    RESOLVE -->|No| ERR["422 / ValueError — explicit model required"]
+    RESOLVE -->|Yes| HIST[("history.start()<br/>Insert pending row")]
 
     HIST --> RETRIEVE["<b>retrieve_node</b>"]
 
     subgraph R["retrieve — src/rag/nodes.py"]
         direction TB
-        HYB{"hybrid<br/>enabled?"}
-        DENSE["dense k-NN<br/>pgvector, FETCH_K=20"]
-        LEX["lexical search<br/>tsvector full-text"]
-        RRF["RRF fusion<br/>src/vectorstore/hybrid.py"]
-        RER{"rerank<br/>enabled?"}
-        CE["cross-encoder rerank<br/>ms-marco-MiniLM-L-6-v2, CPU"]
-        TOPK["top RETRIEVE_K = 5"]
-        HYB -->|yes| DENSE --> RRF
-        HYB -->|yes| LEX --> RRF
-        HYB -->|no| DENSE
+        HYB{"RAG_HYBRID<br/>enabled?"}
+        DENSE["Dense k-NN (pgvector)<br/>FETCH_K = 20"]
+        LEX["Lexical Search<br/>tsvector + GIN, ts_rank_cd"]
+        RRF["Reciprocal Rank Fusion<br/>RRF_K = 60 (src/vectorstore/hybrid.py)"]
+        RER{"RAG_RERANK<br/>enabled?"}
+        CE["Cross-Encoder Rerank (CPU)<br/>ms-marco-MiniLM-L-6-v2<br/>Squashed Logits -> [0, 1]"]
+        TOPK["Truncate to RETRIEVE_K = 5"]
+        HYB -->|Yes| DENSE --> RRF
+        HYB -->|Yes| LEX --> RRF
+        HYB -->|No| DENSE
         RRF --> RER
         DENSE --> RER
-        RER -->|yes| CE --> TOPK
-        RER -->|no| TOPK
+        RER -->|Yes| CE --> TOPK
+        RER -->|No| TOPK
     end
 
     RETRIEVE --> HYB
-    TOPK --> GRADE["<b>grade_node</b><br/>drop chunks below RELEVANCE_FLOOR 0.56<br/>and below RELEVANCE_RATIO 0.9 of the best"]
+    TOPK --> GRADE["<b>grade_node</b><br/>Drop chunks below RELEVANCE_FLOOR (0.56)<br/>and below RELEVANCE_RATIO (0.9) of top chunk.<br/>Lexical hits preserved."]
 
-    GRADE --> KEPT{"any chunks<br/>survive?"}
-    KEPT -->|no| REFUSE["REFUSAL_ANSWER<br/>no sources — a refusal, not a guess"]
-    KEPT -->|yes| GEN["<b>generate_node</b><br/>prompt = template + context chunks<br/>ChatOllama, num_ctx per model"]
+    GRADE --> KEPT{"Any chunks<br/>survive?"}
+    KEPT -->|No| REFUSE["_refusal()<br/>REFUSAL_ANSWER — no hallucinated sources"]
+    KEPT -->|Yes| GEN["<b>generate_node / generate_stream</b><br/>Prompt = Plain prose context + Question<br/>ChatOllama (temperature=0, num_ctx)"]
 
-    GEN --> THINK{"thinking model?<br/>(qwen3*)"}
-    THINK -->|yes| STRIP["strip &lt;think&gt; block<br/>append /no_think"]
-    THINK -->|no| CITE
-    STRIP --> CITE["citations — computed in code,<br/>not asked of the LLM"]
+    GEN --> THINK{"Thinking Model?<br/>(qwen3*)"}
+    THINK -->|Yes| STRIP["_ThinkFilter / /no_think prompt suffix"]
+    THINK -->|No| CITE
+    STRIP --> CITE["Citations — computed in code<br/>from graded document units"]
 
     REFUSE --> DONE
-    CITE --> DONE[("history.complete()<br/>answer, sources, latency breakdown")]
+    CITE --> DONE[("history.complete()<br/>Answer, citations, confidence, latency breakdown")]
 
     classDef bad fill:#f8514922,stroke:#f85149
     class ERR,REFUSE bad
 ```
 
-- **There is no retry edge:** Retrieval is deterministic; re-running the same query returns the same results.
-- **Citations are computed, not generated:** Small models don't reliably follow inline-citation rules, so `src/rag/citations.py` deterministically attributes sources from graded chunks.
+### Key Query-Path Invariants:
+1. **No Retry Loop:** Retrieval is deterministic. Without query rewriting, looping on identical inputs cannot surface new chunks that cleared cutoffs the top results missed.
+2. **Deterministic Attribution:** Citations (`src/rag/citations.py`) are extracted from surviving graded chunks, mapping directly to `(file_id, unit_index)`. Small models are never asked to generate inline citations.
+3. **Thinking Suppression:** Thinking models like `qwen3` are constrained via `/no_think` prompt directives and token-level `_ThinkFilter` streaming filters to prevent UI pollution and save inference latency.
+4. **Retrieval Impact Comparison:** `ask_compare()` and `ask_direct()` execute grounded vs direct LLM generation side-by-side without writing ad-hoc test queries to query history.
+
+---
 
 ## 5. Ingesting Documents
 
 ```mermaid
 flowchart LR
-    UP["POST /api/ingest<br/>multipart upload"] --> HASH["stream to disk,<br/>hash while writing"]
-    HASH --> DEDUP{"hash already<br/>ingested?"}
-    DEDUP -->|yes| SKIP["409 — already ingested"]
-    DEDUP -->|no| PARSE{"CSV parses<br/>to usable rows?"}
-    PARSE -->|no| REJECT["422 — UnusableCSV"]
-    PARSE -->|yes| REC[("files.record()<br/>provenance row")]
-    REC --> SUBMIT["runner.submit()<br/>background thread"]
+    UP["POST /api/ingest/upload<br/>multipart upload (.csv, .json, .jsonl, .txt, .md, .pdf)"] --> HASH["Stream to disk,<br/>compute SHA-256"]
+    HASH --> DEDUP{"SHA-256 already<br/>in ingested_files?"}
+    DEDUP -->|Yes| SKIP["409 — Already ingested"]
+    DEDUP -->|No| PARSE{"File parses to<br/>valid units?"}
+    PARSE -->|No| REJECT["422 — Unusable / Unsupported File"]
+    PARSE -->|Yes| REC[("files.record()<br/>Provenance row")]
+    REC --> SUBMIT["runner.submit_exclusive()<br/>Background thread"]
 
-    SUBMIT --> P1["load_documents<br/>src/ingestion/loaders.py"]
-    P1 --> P2["split_documents<br/>1000 chars, 150 overlap"]
-    P2 --> P3["build_vectorstore<br/>embed via Ollama, write to pgvector"]
-    P3 --> P4["ensure_index<br/>tsvector column + GIN index"]
-    P4 --> OK["job complete<br/>documents, chunks, chunk_ids"]
+    SUBMIT --> P1["iter_units & load_documents<br/>src/ingestion/units.py"]
+    P1 --> P2["split_documents<br/>recursive (1000/150) or token"]
+    P2 --> P3["build_vectorstore<br/>Batch embedding + duplicate text reuse"]
+    P3 --> P4["ensure_index<br/>Backfill tsvector + GIN index"]
+    P4 --> OK["Job Done<br/>Record chunk_ids on file"]
 
     classDef bad fill:#f8514922,stroke:#f85149
     class SKIP,REJECT bad
 ```
 
-**Invariant:** The embedding model used at ingest must match the one used at query time. A mismatch silently returns garbage neighbours.
+### Key Ingest-Path Invariants:
+1. **Addressable Units (`src/ingestion/units.py`):** Files are indexed by natural physical units: spreadsheet rows (1-based), document lines (1-based), or PDF pages (1-based). Dataset keys and Dropbox/source URLs are lifted into metadata and excluded from embedding text to preserve token budget.
+2. **Text Deduplication:** Duplicate chunk text across rows is vectorized only once by Ollama; the embedding vector is mapped to all duplicate instances before inserting into pgvector.
+3. **Fault-Tolerant Batching:** Embeddings are dispatched in batches (`RAG_EMBED_BATCH=512`/`1024`) and written incrementally to Postgres. If Ollama crashes on an oversized chunk, divide-and-conquer recursion isolates the failure.
+4. **Embedding Model Pinning:** The active embedding model (`RAG_EMBED_MODEL=nomic-embed-text`) is pinned per collection. Changing embedding models requires re-ingesting the corpus.
 
-## 6. UI Architecture and Metrics
+---
 
-The UI is built with React/Vite and talks to the FastAPI backend. It provides views for Ask, Ingest, Benchmark, System, etc.
+## 6. Document Viewer & Unit Inspector
 
-Since browsers don't expose host system metrics (CPU load, VRAM, GPU temps), these are collected server-side (`src/observability/sysmetrics.py`) using `psutil`, `pynvml`, and Docker APIs, and streamed via Server-Sent Events (SSE).
+The system provides first-class inspection of ingested documents via `src/api/routes/documents.py`:
+- `GET /api/documents/{file_id}`: Retrieves document metadata, unit counts, and CSV column headers.
+- `GET /api/documents/{file_id}/units`: Slices addressable document units with pagination.
+- `GET /api/documents/{file_id}/units/{index}`: Resolves the exact addressable unit referenced by a citation pill.
+- The UI exposes both an inline modal (`DocumentModal.jsx`) and a standalone route (`/documents/:fileId`).
+
+---
+
+## 7. System Telemetry & Configuration Lifetimes
+
+System metrics are collected server-side (`src/observability/sysmetrics.py`) using `psutil`, `pynvml`, and Docker statistics, and pushed over a 1Hz Server-Sent Events stream (`GET /api/metrics/stream`).
 
 ### Configuration Lifetimes
 
 | Lifetime | Examples | Changing it means |
 |---|---|---|
-| **Baked into the index** | chunk size, overlap, embedding model | Re-ingesting the entire corpus |
-| **Live per query** | `k`, relevance cutoffs, chat model | Takes effect on the next query |
-| **Server-owned** | `DATABASE_URL`, `OLLAMA_BASE_URL` | Restart; never exposed to browser |
+| **Baked into the index** | Chunk size, chunk overlap, embedding model (`RAG_EMBED_MODEL`) | Re-ingesting the corpus |
+| **Live per query** | Chat model (`model`), candidate fetch count (`RAG_FETCH_K`), relevance floor/ratio, reranker toggle (`RAG_RERANK`) | Takes effect on the next query |
+| **Server-owned** | `DATABASE_URL`, `OLLAMA_BASE_URL`, `RAG_NUM_CTX_QWEN3` | Server restart; never exposed to browser |
 
-## 7. Where New Code Goes
+---
+
+## 8. Where New Code Goes
 
 | You are adding… | It belongs in |
 |---|---|
-| A new document format | `src/ingestion/loaders.py` |
-| A new chunking strategy | `src/ingestion/splitter.py` (register it in `SPLITTERS`) |
-| A new retrieval signal | `src/vectorstore/`, fused in `hybrid.py` |
-| A change to how answers are produced | `src/rag/nodes.py` + `src/rag/prompts.py` |
-| A new endpoint | A router in `src/api/routes/`, schemas in `src/api/schemas.py` |
-| Anything long-running | A job kind on `src/jobs/runner.py`, never inline in a route |
-| A new dashboard screen | `ui/src/views/`, wired into `ui/src/App.jsx` |
+| A new document format parser | `src/ingestion/units.py` (and register in `_READERS`) |
+| A new chunking algorithm | `src/ingestion/splitter.py` (and register in `SPLITTERS`) |
+| A new retrieval or ranking signal | `src/vectorstore/`, fused in `hybrid.py` or `rerank.py` |
+| A retrieval/grading/generation node | `src/rag/retrieve.py`, `src/rag/grade.py`, or `src/rag/generate.py` |
+| Model registry or thinking suppression | `src/rag/models.py`, `src/rag/thinking.py`, or `src/rag/model_policy.py` |
+| A prompt template or generation filter | `src/rag/prompts.py` or `src/rag/nodes.py` (facade) |
+| A new API route or schema | `src/api/routes/` and `src/api/schemas.py` |
+| A new background task | `src/jobs/runner.py`, submitted via `runner.submit` or `runner.submit_exclusive` |
+| A benchmark evaluation runner or tool | `src/benchmark/runner.py`, `src/benchmark/cache.py`, `src/benchmark/files.py` |
+| A database query or schema change | `src/db/engine.py`, `src/rag/history.py`, or `src/ingestion/files.py` |
+| A new dashboard screen or component | `ui/src/views/` and `ui/src/components/`, routed lazily in `ui/src/App.jsx` |

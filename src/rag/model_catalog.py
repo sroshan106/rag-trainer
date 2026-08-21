@@ -18,18 +18,10 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # Chat models the UI is allowed to offer as choices for download and selection.
 CATALOG = AVAILABLE_MODELS
 
-_DEFAULT_EMBED_MODELS = (
-    "nomic-embed-text",
-    "all-minilm",
-    "bge-m3",
-    "bge-small",
-    "mxbai-embed-large",
-    "snowflake-arctic-embed",
-)
+
 def _ensure_in_tuple(item: str, defaults: tuple[str, ...]) -> tuple[str, ...]:
     return defaults if item in defaults else (item, *defaults)
 
-EMBED_MODELS = _ensure_in_tuple(EMBED_MODEL, _DEFAULT_EMBED_MODELS)
 
 RERANK_MODEL = rerank.RERANK_MODEL
 
@@ -88,48 +80,16 @@ MODEL_METADATA = {
         "context": "128k ctx",
         "description": "Microsoft compact reasoning model with high benchmark performance.",
     },
-    # Embedding models
+    # Embedding model. Only one is ever active (RAG_EMBED_MODEL) -- the
+    # collection's stored vectors are pinned to whichever model wrote them, so
+    # there is no catalog of switchable alternatives here, just metadata for
+    # whatever EMBED_MODEL currently resolves to.
     "nomic-embed-text": {
         "min_vram": "500 MB",
         "disk_size": "~274 MB",
         "params": "137M",
         "context": "8192 ctx • 768 dim",
         "description": "Default embedding model for vectorstore retrieval with large context window.",
-    },
-    "all-minilm": {
-        "min_vram": "250 MB",
-        "disk_size": "~120 MB",
-        "params": "33M",
-        "context": "256 ctx • 384 dim",
-        "description": "Extremely fast, lightweight sentence embeddings.",
-    },
-    "bge-m3": {
-        "min_vram": "1.5 GB",
-        "disk_size": "~1.2 GB",
-        "params": "568M",
-        "context": "8192 ctx • 1024 dim",
-        "description": "Multilingual embeddings supporting dense, sparse, and multi-vector search.",
-    },
-    "bge-small": {
-        "min_vram": "200 MB",
-        "disk_size": "~67 MB",
-        "params": "24M",
-        "context": "512 ctx • 384 dim",
-        "description": "Minimal memory footprint embedding model for resource-constrained setups.",
-    },
-    "mxbai-embed-large": {
-        "min_vram": "1.0 GB",
-        "disk_size": "~670 MB",
-        "params": "335M",
-        "context": "512 ctx • 1024 dim",
-        "description": "High retrieval accuracy representation model for English corpus.",
-    },
-    "snowflake-arctic-embed": {
-        "min_vram": "1.0 GB",
-        "disk_size": "~669 MB",
-        "params": "335M",
-        "context": "512 ctx • 1024 dim",
-        "description": "Enterprise-grade retrieval embedding model by Snowflake.",
     },
     # Reranker models
     "cross-encoder/ms-marco-MiniLM-L-6-v2": {
@@ -176,7 +136,10 @@ MODEL_METADATA = {
     },
 }
 
-_OLLAMA_PULLABLE = (*CATALOG, *EMBED_MODELS)
+# Chat models only -- embed and rerank models are not downloadable through the
+# UI's pull flow (embed has a single pinned active model; rerank pulls happen
+# through pull_reranker's HuggingFace path instead).
+_OLLAMA_PULLABLE = CATALOG
 
 # Timeout for reading progress lines from Ollama.
 PULL_READ_TIMEOUT_SECONDS = 60.0
@@ -205,11 +168,6 @@ def list_installed() -> list[str]:
     """Catalog chat models actually present in the Ollama instance right now."""
     names = _installed_names()
     return [m for m in CATALOG if _is_installed(m, names)]
-
-
-def embed_models_installed() -> list[str]:
-    names = _installed_names()
-    return [m for m in EMBED_MODELS if _is_installed(m, names)]
 
 
 def rerankers_installed() -> list[str]:

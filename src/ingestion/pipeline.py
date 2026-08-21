@@ -19,20 +19,41 @@ def ingest(
     path: str | Path,
     progress: ProgressHook | None = None,
     splitter: str = DEFAULT_SPLITTER,
+    file_id: str | None = None,
+    filename: str | None = None,
+    index_columns: list[str] | None = None,
+    citation_columns: list[str] | None = None,
 ) -> dict:
-    """Load, split, and embed path, returning what was written."""
+    """Load, split, and embed path, returning what was written.
+
+    ``file_id``/``filename`` identify the upload these chunks belong to, and
+    are stamped onto every chunk so a citation can name the document and open
+    it. The CLI leaves them unset -- it ingests paths that were never uploaded.
+    """
     def report(fraction: float, message: str) -> None:
         if progress:
             progress(fraction, message)
 
     report(0.05, f"loading {path}")
-    docs = load_documents(path)
+    docs = load_documents(
+        path,
+        file_id=file_id,
+        filename=filename,
+        index_columns=index_columns,
+        citation_columns=citation_columns,
+    )
 
     report(0.2, f"splitting {len(docs)} documents ({splitter})")
     chunks = split_documents(docs, splitter=splitter)
 
     report(0.3, f"embedding {len(chunks)} chunks")
-    chunk_ids = build_vectorstore(chunks)
+
+    # Embedding is the long pole, so batch progress is mapped across the 0.3 ->
+    # 0.95 span rather than leaving the bar parked at 30% for the whole run.
+    def embed_progress(fraction: float, message: str) -> None:
+        report(0.3 + 0.65 * fraction, message)
+
+    chunk_ids = build_vectorstore(chunks, progress=embed_progress)
 
     report(0.95, "building full-text index")
     index_built = ensure_index()
@@ -45,6 +66,8 @@ def ingest(
         "chunk_ids": chunk_ids,
         "splitter": splitter,
         "index_built": index_built,
+        "index_columns": index_columns,
+        "citation_columns": citation_columns,
     }
 
 

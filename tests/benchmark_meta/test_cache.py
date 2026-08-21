@@ -50,18 +50,23 @@ def test_truncated_final_line_is_skipped(tmp_path):
 
 def test_eval_uses_the_cache_it_is_given(tmp_path, monkeypatch):
     """The whole point of passing a cache in: answers must land in it."""
+    test_csv = tmp_path / "test.csv"
+    test_csv.write_text("question,answer\nq1,a1\nq2,a2\nq3,a3\n")
     monkeypatch.setattr(
         run_benchmark, "_run", lambda q, model=None: {"answer": "x", "retrieved_indices": ["7"]}
     )
     with ResultCache(tmp_path / "c.jsonl") as cache:
         run_benchmark.eval_answerable(
-            "single_passage_answer_questions.csv", workers=2, cache=cache, sample=2
+            test_csv, workers=2, cache=cache, sample=2
         )
         assert len(cache) == 2
 
 
-def test_sampling_is_stable_across_calls():
-    a = run_benchmark._load_csv("single_passage_answer_questions.csv", 5)
-    b = run_benchmark._load_csv("single_passage_answer_questions.csv", 5)
+def test_sampling_is_stable_across_calls(tmp_path):
+    test_csv = tmp_path / "test.csv"
+    rows = "\n".join([f"question {i},answer {i}" for i in range(20)])
+    test_csv.write_text(f"question,answer\n{rows}\n")
+    a = run_benchmark._load_csv(test_csv, 5)
+    b = run_benchmark._load_csv(test_csv, 5)
     assert [r["question"] for r in a] == [r["question"] for r in b]
     assert len(a) == 5

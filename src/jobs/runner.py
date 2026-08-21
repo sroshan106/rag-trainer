@@ -4,6 +4,7 @@ import threading
 import time
 import traceback
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
@@ -11,6 +12,7 @@ JobStatus = Literal["pending", "running", "done", "failed", "cancelled"]
 
 TERMINAL_STATUSES = ("done", "failed", "cancelled")
 MAX_FINISHED_JOBS = 200
+MAX_CONCURRENT_JOBS = 8
 
 
 class JobAlreadyRunning(Exception):
@@ -98,11 +100,12 @@ class ProgressReporter:
 
 
 class JobRunner:
-    """Registry of jobs keyed by id, each executed on its own thread."""
+    """Registry of jobs keyed by id, executed on a managed worker pool."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_workers: int = MAX_CONCURRENT_JOBS) -> None:
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
+        self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="job-worker")
 
     def submit(
         self,
@@ -159,7 +162,7 @@ class JobRunner:
             finally:
                 self._prune()
 
-        threading.Thread(target=run, name=f"job-{kind}-{job.id[:8]}", daemon=True).start()
+        self._pool.submit(run)
         return job
 
     def get(self, job_id: str) -> Job | None:

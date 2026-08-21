@@ -30,7 +30,10 @@ def get_engine(
     with _lock:
         engine = _engines.get(url)
         if engine is None:
-            engine = sa.create_engine(url)
+            kwargs = {"pool_pre_ping": True}
+            if not url.startswith("sqlite"):
+                kwargs.update({"pool_recycle": 3600, "pool_size": 10, "max_overflow": 20})
+            engine = sa.create_engine(url, **kwargs)
             _engines[url] = engine
         if init is not None and (url, init) not in _initialized:
             # Left unmarked if it raises, so the next caller retries it.

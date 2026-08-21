@@ -35,6 +35,7 @@ export default function Ask() {
   const [historyError, setHistoryError] = useState(null);
   const [models, setModels] = useState([]);
   const [model, setModel] = useState("");
+  const [modelsLoaded, setModelsLoaded] = useState(false);
   const [collection, setCollection] = useState(null);
 
   const inputRef = useRef(null);
@@ -58,9 +59,12 @@ export default function Ask() {
     queryModels().then(({ models: available }) => {
       if (ignore) return;
       setModels(available);
+      setModelsLoaded(true);
       const saved = localStorage.getItem(MODEL_STORAGE_KEY);
       setModel(saved && available.includes(saved) ? saved : available[0] || "");
-    }).catch(() => {});
+    }).catch(() => {
+      if (!ignore) setModelsLoaded(true);
+    });
     collectionStatus().then((s) => {
       if (!ignore) setCollection(s);
     }).catch(() => {});
@@ -100,7 +104,7 @@ export default function Ask() {
         query: trimmed,
         model: chosenModel || null,
         answer: "",
-        sources: [],
+        citations: [],
         stage: "retrieve",
         stageDetail: null,
       });
@@ -200,19 +204,19 @@ export default function Ask() {
     <div className="flex flex-col gap-6 max-w-4xl mx-auto">
       {/* Page Header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-100">Ask Question</h1>
-        <p className="text-sm text-slate-400 mt-1">Query your knowledge base through the RAG pipeline</p>
+        <h1 className="text-2xl font-bold tracking-tight text-ink">Ask Question</h1>
+        <p className="text-sm text-ink-3 mt-1">Query your knowledge base through the RAG pipeline</p>
       </div>
 
       {/* Query Box */}
-      <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-5 shadow-sm">
+      <div className="rounded-2xl border border-hairline bg-surface p-5 shadow-card">
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <div className="relative">
             <textarea
               ref={inputRef}
               autoFocus
               rows={2}
-              className="w-full resize-none rounded-xl border border-slate-700/80 bg-slate-900/90 px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 transition-all font-normal"
+              className="w-full resize-none rounded-xl border border-hairline bg-surface px-4 py-3 text-sm text-ink placeholder-ink-4 focus:outline-none focus:border-accent-line focus:ring-1 focus:ring-accent/40 transition-all font-normal"
               placeholder="What would you like to know from your documents? (⌘K)"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -222,27 +226,27 @@ export default function Ask() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-slate-400">Model</span>
+              <span className="text-xs font-medium text-ink-3">Model</span>
               {models.length > 0 ? (
                 <div className="relative">
                   <select
                     value={model}
                     onChange={(e) => onModelChange(e.target.value)}
                     disabled={loading}
-                    className="appearance-none rounded-lg border border-slate-700/80 bg-slate-900/90 text-slate-200 px-3 py-1.5 pr-8 text-xs font-mono font-medium focus:outline-none focus:border-blue-500 transition-colors cursor-pointer"
+                    className="appearance-none rounded-lg border border-hairline bg-surface text-ink px-3 py-1.5 pr-8 text-xs font-mono font-medium focus:outline-none focus:border-accent-line transition-colors cursor-pointer"
                   >
                     {models.map((m) => (
-                      <option key={m} value={m} className="bg-[#111726] text-slate-200">
+                      <option key={m} value={m} className="bg-surface text-ink">
                         {m}
                       </option>
                     ))}
                   </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-ink-3">
                     <span className="text-[10px]">▼</span>
                   </div>
                 </div>
               ) : (
-                <span className="text-xs text-amber-400">No model loaded</span>
+                <span className="text-xs text-amber-700">No model loaded</span>
               )}
             </div>
 
@@ -251,7 +255,7 @@ export default function Ask() {
                 <button
                   type="button"
                   onClick={cancel}
-                  className="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors"
+                  className="px-4 py-2 rounded-lg border border-hairline bg-surface-2 hover:bg-surface-3 text-ink text-xs font-medium transition-colors"
                 >
                   Cancel
                 </button>
@@ -259,7 +263,7 @@ export default function Ask() {
                 <button
                   type="submit"
                   disabled={!query.trim() || !model}
-                  className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 text-sm font-medium transition-all shadow-sm shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  className="flex items-center gap-2 rounded-lg bg-accent hover:bg-accent-strong text-white px-5 py-2 text-sm font-medium transition-all shadow-sm shadow-accent/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
                   <Sparkles className="h-4 w-4" />
                   <span>Ask</span>
@@ -271,9 +275,9 @@ export default function Ask() {
 
         {/* Starter suggestion chips */}
         {rows.length === 0 && !live && (
-          <div className="mt-4 pt-4 border-t border-slate-800/80">
-            <div className="text-xs font-medium text-slate-400 mb-2.5 flex items-center gap-1.5">
-              <Sparkles className="h-3.5 w-3.5 text-blue-400" />
+          <div className="mt-4 pt-4 border-t border-hairline">
+            <div className="text-xs font-medium text-ink-3 mb-2.5 flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-accent" />
               <span>Suggested questions:</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -285,7 +289,7 @@ export default function Ask() {
                     setQuery(suggestion);
                     inputRef.current?.focus();
                   }}
-                  className="text-left text-xs p-2.5 rounded-xl border border-slate-800/80 bg-slate-900/40 hover:bg-slate-800/80 hover:border-slate-700 text-slate-300 transition-all leading-snug"
+                  className="text-left text-xs p-2.5 rounded-xl border border-hairline bg-surface-2 hover:bg-surface-2 hover:border-hairline text-ink-2 transition-all leading-snug"
                 >
                   "{suggestion}"
                 </button>
@@ -297,12 +301,12 @@ export default function Ask() {
 
       {/* Warnings */}
       {modelsLoaded && models.length === 0 && (
-        <div className="rounded-xl border border-amber-800/80 bg-amber-950/30 p-4 text-sm text-amber-300 flex items-start gap-3">
-          <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-700 shrink-0 mt-0.5" />
           <div className="flex-1">
             <p>
               No chat model is downloaded yet.{" "}
-              <Link to="/settings" className="font-semibold underline hover:text-amber-200">
+              <Link to="/settings" className="font-semibold underline hover:text-amber-700">
                 Download one in Settings
               </Link>{" "}
               to start asking questions.
@@ -312,12 +316,12 @@ export default function Ask() {
       )}
 
       {collection?.empty && (
-        <div className="rounded-xl border border-amber-800/80 bg-amber-950/30 p-4 text-sm text-amber-300 flex items-start gap-3">
-          <Database className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 flex items-start gap-3">
+          <Database className="h-5 w-5 text-amber-700 shrink-0 mt-0.5" />
           <div className="flex-1">
             <p>
               Knowledge base is empty.{" "}
-              <Link to="/ingest" className="font-semibold underline hover:text-amber-200">
+              <Link to="/ingest" className="font-semibold underline hover:text-amber-700">
                 Ingest a dataset
               </Link>{" "}
               first to get answers with grounded citations.
@@ -327,8 +331,8 @@ export default function Ask() {
       )}
 
       {error && (
-        <div className="rounded-xl border border-rose-800/80 bg-rose-950/40 p-4 text-sm text-rose-300 flex items-start gap-3">
-          <AlertCircle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-rose-700 shrink-0 mt-0.5" />
           <div className="flex-1">
             <span className="font-semibold">Error: </span>
             {error}
@@ -349,7 +353,7 @@ export default function Ask() {
 
       {/* History Error */}
       {historyError && (
-        <div className="rounded-xl border border-rose-800/80 bg-rose-950/40 p-4 text-sm text-rose-300">
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
           History unavailable: {historyError}
         </div>
       )}
@@ -371,7 +375,7 @@ export default function Ask() {
           <button
             type="button"
             onClick={onClear}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-900/60 hover:bg-rose-950/40 hover:border-rose-900/60 text-slate-400 hover:text-rose-400 text-xs transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-hairline bg-surface-2 hover:bg-rose-50 hover:border-rose-200 text-ink-3 hover:text-rose-700 text-xs transition-colors"
           >
             <Trash2 className="h-3.5 w-3.5" />
             <span>Clear all history</span>

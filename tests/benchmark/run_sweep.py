@@ -9,7 +9,7 @@ point is argued from the curve.
 Each grid point is a distinct cache fingerprint, so results accumulate across
 runs and an interrupted sweep resumes.
 
-Run: python -m tests.benchmark.run_sweep [--sample N] [--workers N]
+Run: python -m tests.benchmark.run_sweep --model <model> [--sample N] [--workers N]
 """
 
 import argparse
@@ -42,9 +42,9 @@ def _reconfigure(floor: float, ratio: float) -> None:
 
 
 def combined_score(results: list[dict]) -> dict:
-    """Collapse the three suites into one comparable number.
+    """Collapse all suites into one comparable number.
 
-    Answerable suites contribute their pass rate, the no-answer suite its
+    Answerable suites contribute their pass rate, no-answer suites their
     correct-refusal rate, each weighted by question count. A cutoff that wins
     only by refusing everything, or only by answering everything, cannot score
     well on this -- which is the whole point of sweeping.
@@ -60,19 +60,20 @@ def combined_score(results: list[dict]) -> dict:
             (v for k, v in r.items() if k.startswith("pass_rate")),
             r.get("correct_refusal_rate"),
         )
-        parts[r["name"].replace("_questions.csv", "")] = round(rate, 3)
+        short = r["name"].replace(".csv", "").replace("_", " ").strip()
+        parts[short] = round(rate, 3)
         correct += rate * n
         total += n
     return {"combined": round(correct / total, 3) if total else 0.0, **parts}
 
 
-def sweep(sample: int, workers: int) -> list[dict]:
+def sweep(sample: int, workers: int, model: str) -> list[dict]:
     rows = []
     for ratio in RATIOS:
         for floor in FLOORS:
             _reconfigure(floor, ratio)
             print(f"  floor={floor} ratio={ratio} ...", flush=True)
-            results = run_benchmark.run_all(workers=workers, sample=sample)
+            results = run_benchmark.run_all(workers=workers, sample=sample, model=model)
             row = {"floor": floor, "ratio": ratio, **combined_score(results)}
             rows.append(row)
             print(f"    -> combined {row['combined']}", flush=True)
@@ -93,12 +94,18 @@ def _report(rows: list[dict]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--model",
+        required=True,
+        choices=list(run_benchmark.AVAILABLE_MODELS),
+        help="model to sweep -- must already be pulled",
+    )
     parser.add_argument("--sample", type=int, default=DEFAULT_SAMPLE)
     parser.add_argument("--workers", type=int, default=run_benchmark.DEFAULT_WORKERS)
     args = parser.parse_args(argv)
 
-    print(f"sweeping {len(FLOORS) * len(RATIOS)} points, {args.sample} questions/suite")
-    rows = sweep(args.sample, args.workers)
+    print(f"sweeping {len(FLOORS) * len(RATIOS)} points, {args.sample} questions/suite, model {args.model}")
+    rows = sweep(args.sample, args.workers, args.model)
     _report(rows)
     return 0
 

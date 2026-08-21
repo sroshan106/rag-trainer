@@ -8,7 +8,12 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from src.api.schemas import IngestFileEntry, JobResponse
 from src.ingestion import files as file_history
-from src.ingestion.loaders import UnusableCSV, load_documents
+from src.ingestion.loaders import (
+    SUPPORTED_EXTENSIONS,
+    UnreadableFile,
+    UnsupportedFileType,
+    load_documents,
+)
 from src.ingestion.pipeline import ingest
 from src.ingestion.splitter import DEFAULT_SPLITTER, SPLITTERS
 from src.jobs.runner import JobAlreadyRunning, ProgressReporter, runner
@@ -23,14 +28,38 @@ MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 JOB_KIND = "ingest"
 
 
-def _ingest_job(path: str, file_record_id: str, splitter: str):
+import json
+
+
+def _ingest_job(
+    path: str,
+    file_record_id: str,
+    splitter: str,
+    filename: str,
+    index_columns: list[str] | None = None,
+    citation_columns: list[str] | None = None,
+):
     def run(reporter: ProgressReporter) -> dict:
+        ingest_kwargs = {}
+        if index_columns is not None:
+            ingest_kwargs["index_columns"] = index_columns
+        if citation_columns is not None:
+            ingest_kwargs["citation_columns"] = citation_columns
+
+        def report(fraction: float, message: str) -> None:
+            # Checked on every progress tick (each embedding batch included) so
+            # a cancel takes effect within one batch instead of only after the
+            # whole ingest -- previously it just relabeled the finished job.
+            reporter.raise_if_cancelled()
+            reporter.update(progress=fraction, message=message)
+
         result = ingest(
             path,
-            progress=lambda fraction, message: reporter.update(
-                progress=fraction, message=message
-            ),
+            progress=report,
             splitter=splitter,
+            file_id=file_record_id,
+            filename=filename,
+            **ingest_kwargs,
         )
         file_history.set_chunk_ids(file_record_id, result.get("chunk_ids", []))
         return result
@@ -38,9 +67,26 @@ def _ingest_job(path: str, file_record_id: str, splitter: str):
     return run
 
 
-def _submit(path: str, file_record_id: str, splitter: str) -> dict:
+def _submit(
+    path: str,
+    file_record_id: str,
+    splitter: str,
+    filename: str,
+    index_columns: list[str] | None = None,
+    citation_columns: list[str] | None = None,
+) -> dict:
     try:
-        job = runner.submit_exclusive(JOB_KIND, _ingest_job(path, file_record_id, splitter))
+        job = runner.submit_exclusive(
+            JOB_KIND,
+            _ingest_job(
+                path,
+                file_record_id,
+                splitter,
+                filename,
+                index_columns=index_columns,
+                citation_columns=citation_columns,
+            ),
+        )
     except JobAlreadyRunning as exc:
         raise HTTPException(
             status_code=409,
@@ -54,18 +100,40 @@ def list_splitters() -> dict:
     return {"splitters": list(SPLITTERS), "default": DEFAULT_SPLITTER}
 
 
+def _parse_columns(raw: str | None) -> list[str] | None:
+    """A JSON array or comma-separated list of column names, from a form field."""
+    if not raw:
+        return None
+    try:
+        val = json.loads(raw)
+        if isinstance(val, list):
+            return [str(x) for x in val if str(x).strip()]
+    except Exception:
+        pass
+    return [x.strip() for x in raw.split(",") if x.strip()]
+
+
 @router.post("/upload", response_model=JobResponse, status_code=202)
 def upload_and_ingest(
-    file: UploadFile = File(...), splitter: str = Form(DEFAULT_SPLITTER)
+    file: UploadFile = File(...),
+    splitter: str = Form(DEFAULT_SPLITTER),
+    index_columns: str | None = Form(None),
+    citation_columns: str | None = Form(None),
 ) -> dict:
     if splitter not in SPLITTERS:
         raise HTTPException(
             status_code=422,
             detail=f"unknown splitter {splitter!r} -- choose from {list(SPLITTERS)}",
         )
-    original = Path(file.filename or "upload.csv").name
-    if not original.lower().endswith(".csv"):
-        raise HTTPException(status_code=415, detail="only .csv files are supported")
+    original = Path(file.filename or "upload").name
+    if Path(original).suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=415,
+            detail=f"unsupported file type -- expected one of: {', '.join(sorted(SUPPORTED_EXTENSIONS))}",
+        )
+
+    parsed_index_columns = _parse_columns(index_columns)
+    parsed_citation_columns = _parse_columns(citation_columns)
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     target = UPLOAD_DIR / f"{uuid.uuid4().hex}-{original}"
@@ -95,27 +163,45 @@ def upload_and_ingest(
         )
 
     try:
-        documents = len(load_documents(target))
-    except UnusableCSV as exc:
+        doc_kwargs = {}
+        if parsed_index_columns is not None:
+            doc_kwargs["index_columns"] = parsed_index_columns
+        if parsed_citation_columns is not None:
+            doc_kwargs["citation_columns"] = parsed_citation_columns
+        documents = len(load_documents(target, filename=original, **doc_kwargs))
+    except (UnreadableFile, UnsupportedFileType) as exc:
         target.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (UnicodeDecodeError, OSError) as exc:
         target.unlink(missing_ok=True)
-        raise HTTPException(status_code=422, detail=f"could not read the CSV: {exc}") from exc
+        raise HTTPException(status_code=422, detail=f"could not read the file: {exc}") from exc
 
     if documents == 0:
         target.unlink(missing_ok=True)
-        raise HTTPException(status_code=422, detail="the CSV has no rows with text")
+        raise HTTPException(status_code=422, detail="the file has no usable text")
+
+    record_kwargs = {"documents": documents}
+    if parsed_index_columns is not None:
+        record_kwargs["index_columns"] = parsed_index_columns
+    if parsed_citation_columns is not None:
+        record_kwargs["citation_columns"] = parsed_citation_columns
 
     record_id = file_history.record(
         filename=original,
         stored_path=target,
         sha256=sha256,
         size_bytes=size,
-        documents=documents,
+        **record_kwargs,
     )
     try:
-        return _submit(str(target), record_id, splitter)
+        return _submit(
+            str(target),
+            record_id,
+            splitter,
+            original,
+            index_columns=parsed_index_columns,
+            citation_columns=parsed_citation_columns,
+        )
     except HTTPException:
         target.unlink(missing_ok=True)
         file_history.delete(record_id)
@@ -138,11 +224,20 @@ def delete_ingested_file(file_id: str) -> dict:
     if entry is None:
         raise HTTPException(status_code=404, detail="no such ingested file")
 
-    delete_chunks(entry.get("chunk_ids") or [])
-    Path(entry["stored_path"]).unlink(missing_ok=True)
+    chunk_ids = entry.get("chunk_ids") or []
+    try:
+        delete_chunks(chunk_ids)
+    except Exception as exc:
+        file_history.logger.warning("Failed to delete chunks for file %s: %s", file_id, exc)
+
+    try:
+        Path(entry["stored_path"]).unlink(missing_ok=True)
+    except Exception as exc:
+        file_history.logger.warning("Failed to unlink stored file %s: %s", entry["stored_path"], exc)
+
     file_history.delete(file_id)
 
-    return {"deleted_chunks": len(entry.get("chunk_ids") or []), "filename": entry["filename"]}
+    return {"deleted_chunks": len(chunk_ids), "filename": entry["filename"]}
 
 
 @router.get("/active", response_model=JobResponse | None)

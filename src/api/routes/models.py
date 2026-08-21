@@ -22,8 +22,9 @@ def list_models() -> dict:
     return {
         "catalog": list(model_catalog.CATALOG),
         "installed": model_catalog.list_installed(),
-        "embed_models": list(model_catalog.EMBED_MODELS),
-        "embed_installed": model_catalog.embed_models_installed(),
+        # Informational only -- the embed model is pinned (mixing dimensions
+        # in one collection corrupts similarity search), so there is nothing
+        # to select or download here.
         "active_embed_model": model_catalog.EMBED_MODEL,
         "rerank_models": list(model_catalog.RERANK_CATALOG),
         "rerank_installed": model_catalog.rerankers_installed(),
@@ -39,16 +40,15 @@ def list_models() -> dict:
 
 @router.post("/pull", response_model=JobResponse, status_code=202)
 def start_pull(body: PullModelRequest) -> dict:
-    ollama_pullable = (*model_catalog.CATALOG, *model_catalog.EMBED_MODELS)
     is_reranker = (
         body.model in model_catalog.RERANK_CATALOG
         or body.model == model_catalog.RERANK_MODEL
     )
-    if body.model not in ollama_pullable and not is_reranker:
+    if body.model not in model_catalog.CATALOG and not is_reranker:
         raise HTTPException(
             status_code=422,
             detail=f"unknown model {body.model!r} -- choose from "
-            f"{[*ollama_pullable, *model_catalog.RERANK_CATALOG]}",
+            f"{[*model_catalog.CATALOG, *model_catalog.RERANK_CATALOG]}",
         )
 
     def _run(reporter: ProgressReporter) -> dict | None:

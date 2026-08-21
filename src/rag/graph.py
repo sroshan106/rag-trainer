@@ -9,9 +9,10 @@ from typing_extensions import TypedDict
 
 from src.observability import tracing
 from src.rag import history
-from src.rag.citations import format_sources
+from src.rag.citations import format_citations
 from src.rag.nodes import (
     AVAILABLE_MODELS,
+    direct_answer,
     generate_node,
     generate_stream,
     grade_node,
@@ -34,7 +35,12 @@ class RAGState(TypedDict):
     retrieved_docs: list[Document]
     graded_docs: list[Document]
     answer: str
-    sources: list[str]
+    citations: list[dict]
+    # Set by the node that actually decides, never inferred from whether any
+    # citations came back -- a chunk can be retrieved and used while carrying
+    # no usable provenance to cite.
+    refused: bool
+    confidence: float
 
 
 def build_graph():
@@ -59,36 +65,92 @@ def build_graph():
 graph = build_graph()
 
 
+def _run_graph(query: str, resolved_model: str) -> tuple[dict, dict, float]:
+    """Run retrieve -> grade -> generate, returning (result, span_durations_ms, latency_ms)."""
+    started = time.perf_counter()
+    # collect() runs independently of RAG_TRACE -- rerank/generate are the
+    # two spans worth breaking out for every query, not just traced ones,
+    # since they're where a slow query is actually spending its time.
+    with tracing.collect() as spans, tracing.span("ask"):
+        result = graph.invoke({"query": query, "model": resolved_model})
+    durations = {s["span"]: s["duration_ms"] for s in spans}
+    return result, durations, round((time.perf_counter() - started) * 1000, 1)
+
+
 def ask(query: str, model: str | None = None) -> dict:
-    """Return the answer plus the sources it was grounded in.
-    
+    """Return the answer plus the citations it was grounded in.
+
     Model is required. Exchange is written to query history table.
     """
     resolved_model = _resolve_model(model)
-    started = time.perf_counter()
     entry_id = history.start(query=query, model=resolved_model)
     try:
-        # collect() runs independently of RAG_TRACE -- rerank/generate are the
-        # two spans worth breaking out for every query, not just traced ones,
-        # since they're where a slow query is actually spending its time.
-        with tracing.collect() as spans, tracing.span("ask"):
-            result = graph.invoke({"query": query, "model": resolved_model})
+        result, durations, latency_ms = _run_graph(query, resolved_model)
     except Exception:
         history.fail(entry_id)
         raise
 
     answer = result["answer"]
-    sources = result.get("sources", [])
-    durations = {s["span"]: s["duration_ms"] for s in spans}
+    citations = result.get("citations", [])
+    refused = result.get("refused", False)
+    confidence = result.get("confidence", 0.0)
     history.complete(
         entry_id,
         answer=answer,
-        sources=sources,
-        latency_ms=round((time.perf_counter() - started) * 1000, 1),
+        citations=citations,
+        refused=refused,
+        confidence=confidence,
+        latency_ms=latency_ms,
         rerank_ms=durations.get("rerank"),
         generate_ms=durations.get("generate"),
     )
-    return {"answer": answer, "sources": sources, "id": entry_id}
+    return {
+        "answer": answer,
+        "citations": citations,
+        "refused": refused,
+        "confidence": confidence,
+        "id": entry_id,
+    }
+
+
+def ask_compare(query: str, model: str | None = None) -> dict:
+    """Grounded answer -- same retrieve/grade/generate path as ``ask`` -- but
+    nothing written to query history. Pairs with ``ask_direct`` for the
+    Benchmark view's side-by-side comparison, which must not pollute Ask's
+    history with ad-hoc test queries.
+    """
+    resolved_model = _resolve_model(model)
+    result, durations, latency_ms = _run_graph(query, resolved_model)
+    return {
+        "answer": result["answer"],
+        "citations": result.get("citations", []),
+        "refused": result.get("refused", False),
+        "confidence": result.get("confidence", 0.0),
+        "model": resolved_model,
+        "latency_ms": latency_ms,
+        "rerank_ms": durations.get("rerank"),
+        "generate_ms": durations.get("generate"),
+    }
+
+
+def ask_direct(query: str, model: str | None = None) -> dict:
+    """Answer with no retrieval step, and nothing written to query history.
+
+    Exists to compare against ``ask``: same model, same generation settings,
+    the only difference is that this path never touches the vectorstore. The
+    gap between the two answers is what embedding/retrieval contributed.
+    """
+    resolved_model = _resolve_model(model)
+    started = time.perf_counter()
+    result = direct_answer(resolved_model, query)
+    latency_ms = round((time.perf_counter() - started) * 1000, 1)
+    return {
+        "answer": result["answer"],
+        "model": resolved_model,
+        "latency_ms": latency_ms,
+        "eval_count": result.get("eval_count"),
+        "tokens_per_sec": result.get("tokens_per_sec"),
+    }
 
 
 def ask_stream(query: str, model: str | None = None):
@@ -148,13 +210,17 @@ def ask_stream(query: str, model: str | None = None):
         return
 
     answer = result["answer"]
-    sources = result.get("sources", [])
+    citations = result.get("citations", [])
+    refused = result.get("refused", False)
+    confidence = result.get("confidence", 0.0)
     durations = {s["span"]: s["duration_ms"] for s in spans}
     latency_ms = round((time.perf_counter() - started) * 1000, 1)
     history.complete(
         entry_id,
         answer=answer,
-        sources=sources,
+        citations=citations,
+        refused=refused,
+        confidence=confidence,
         latency_ms=latency_ms,
         rerank_ms=durations.get("rerank"),
         generate_ms=durations.get("generate"),
@@ -163,8 +229,9 @@ def ask_stream(query: str, model: str | None = None):
         "type": "done",
         "id": entry_id,
         "answer": answer,
-        "sources": sources,
-        "refused": not sources,
+        "citations": citations,
+        "refused": refused,
+        "confidence": confidence,
         "latency_ms": latency_ms,
         "rerank_ms": durations.get("rerank"),
         "generate_ms": durations.get("generate"),
@@ -191,9 +258,10 @@ def main() -> int:
     print(f"model: {model}")
     result = ask(query, model=model)
     print(f"answer: {result['answer']}")
-    sources = format_sources(result["sources"])
-    if sources:
-        print(sources)
+    print(f"confidence: {result['confidence']}")
+    citations = format_citations(result["citations"])
+    if citations:
+        print(citations)
     return 0
 
 

@@ -48,6 +48,20 @@ def test_record_then_find_by_hash(db):
     assert entry["documents"] == 3
 
 
+def test_record_with_index_columns(db):
+    entry_id = files.record(
+        "mine.csv",
+        "data/uploads/mine.csv",
+        "hash_idx",
+        size_bytes=100,
+        documents=5,
+        index_columns=["col_a", "col_b"],
+    )
+
+    entry = files.get(entry_id)
+    assert entry["index_columns"] == ["col_a", "col_b"]
+
+
 def test_find_by_hash_returns_none_for_unknown_hash(db):
     assert files.find_by_hash("nope") is None
 

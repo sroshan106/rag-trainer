@@ -8,9 +8,25 @@ class QueryRequest(BaseModel):
     model: str | None = None
 
 
+class Citation(BaseModel):
+    """Where one grounded chunk came from. See src/ingestion/units.py."""
+
+    file_id: str | None = None
+    filename: str | None = None
+    unit_kind: str | None = None
+    unit_index: int | None = None
+    label: str | None = None
+    url: str | None = None
+    # Column name -> value for the columns designated as this citation's
+    # source (explicitly at ingest, or via the id/url name heuristics).
+    fields: dict[str, str] | None = None
+
+
 class QueryResponse(BaseModel):
     answer: str
-    sources: list[str]
+    citations: list[Citation] = []
+    refused: bool = False
+    confidence: float | None = None
     id: str | None = None
 
 
@@ -24,8 +40,11 @@ class HistoryEntry(BaseModel):
     created_at: str
     query: str
     answer: str | None
-    sources: list[str]
+    # Pre-citation rows still carry bare URL strings here; see history.py.
+    sources: list[str] = []
+    citations: list[Citation] = []
     refused: bool | None
+    confidence: float | None = None
     latency_ms: float | None = None
     rerank_ms: float | None = None
     generate_ms: float | None = None
@@ -37,11 +56,79 @@ class IngestFileEntry(BaseModel):
     id: str
     created_at: str
     filename: str
-    stored_path: str
+    # stored_path is deliberately absent: it is a server filesystem path, and
+    # the browser addresses documents by id through /api/documents instead.
     sha256: str
     size_bytes: int
     documents: int | None = None
     chunk_ids: list[str] | None = None
+    index_columns: list[str] | None = None
+    citation_columns: list[str] | None = None
+
+
+class DocumentMeta(BaseModel):
+    """What a stored document is, before any of its text is fetched."""
+
+    id: str
+    filename: str
+    extension: str
+    unit_kind: str
+    units: int | None = None
+    size_bytes: int
+    created_at: str
+    chunks: int = 0
+    # CSV header, when the viewer can render the document as a table.
+    columns: list[str] | None = None
+    index_columns: list[str] | None = None
+    citation_columns: list[str] | None = None
+
+
+class UnitEntry(BaseModel):
+    """One addressable piece of a document, as ingest read it."""
+
+    index: int
+    kind: str
+    text: str
+    label: str
+    url: str | None = None
+    key: str | None = None
+    fields: dict[str, str] | None = None
+
+
+class CompareRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=4000)
+    model: str | None = None
+
+
+class DirectCompareSide(BaseModel):
+    """The raw-model half of a comparison -- no retrieval, no context."""
+
+    answer: str
+    latency_ms: float
+    eval_count: int | None = None
+    tokens_per_sec: float | None = None
+
+
+class GroundedCompareSide(BaseModel):
+    """The RAG-grounded half of a comparison -- same shape ``ask`` returns,
+    plus the timings ``ask_stream``'s done event carries."""
+
+    answer: str
+    citations: list[Citation] = []
+    refused: bool = False
+    confidence: float | None = None
+    latency_ms: float
+    rerank_ms: float | None = None
+    generate_ms: float | None = None
+
+
+class CompareResponse(BaseModel):
+    """Same query, same model, retrieval on vs off -- side by side. Neither
+    side is written to query history."""
+
+    model: str
+    grounded: GroundedCompareSide
+    direct: DirectCompareSide
 
 
 class BenchmarkRequest(BaseModel):
@@ -57,11 +144,13 @@ class BenchmarkTestFileEntry(BaseModel):
     id: str
     name: str
     filename: str
-    builtin: bool = False
     questions: int
     suite_type: str
     created_at: str | None = None
     size_bytes: int | None = None
+    question_col: str | None = None
+    answer_col: str | None = None
+    doc_index_col: str | None = None
 
 
 class PullModelRequest(BaseModel):

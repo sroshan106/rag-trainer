@@ -20,7 +20,11 @@ LOGGER_NAME = "rag.trace"
 logger = logging.getLogger(LOGGER_NAME)
 
 _details: contextvars.ContextVar = contextvars.ContextVar("span_details", default=None)
-_sink: contextvars.ContextVar = contextvars.ContextVar("span_sink", default=None)
+# Every collector currently active, outermost first. A stack rather than a
+# single slot because collect() nests: ask() opens one of its own to time
+# rerank/generate, and with one slot that inner collector would replace the
+# caller's and silently swallow every span the caller asked for.
+_sinks: contextvars.ContextVar = contextvars.ContextVar("span_sinks", default=())
 
 
 def tracing_enabled() -> bool:
@@ -46,8 +50,7 @@ def detail(**fields) -> None:
 
 
 def _emit(span: dict) -> None:
-    sink = _sink.get()
-    if sink is not None:
+    for sink in _sinks.get():
         sink.append(span)
     logger.info(json.dumps(span, default=str))
 
@@ -55,7 +58,7 @@ def _emit(span: dict) -> None:
 @contextmanager
 def span(name: str):
     """Record one named span if tracing is on or collect() is active."""
-    if not tracing_enabled() and _sink.get() is None:
+    if not tracing_enabled() and not _sinks.get():
         yield
         return
 
@@ -88,13 +91,17 @@ def traced(name: str):
 
 @contextmanager
 def collect():
-    """Capture spans in memory for the duration of the block."""
+    """Capture spans in memory for the duration of the block.
+
+    Nests: an inner collect() receives the spans opened inside it, and every
+    collector enclosing it receives them too.
+    """
     spans: list[dict] = []
-    token = _sink.set(spans)
+    token = _sinks.set(_sinks.get() + (spans,))
     try:
         yield spans
     finally:
         try:
-            _sink.reset(token)
+            _sinks.reset(token)
         except ValueError:
-            _sink.set(None)
+            _sinks.set(())

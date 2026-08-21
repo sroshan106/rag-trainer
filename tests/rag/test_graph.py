@@ -64,13 +64,27 @@ def streaming(monkeypatch):
     def fake_generate_stream(state):
         yield "the "
         yield "answer"
-        return {"answer": "the answer", "sources": ["a.txt"]}
+        return {
+            "answer": "the answer",
+            "citations": [CITATION],
+            "refused": False,
+            "confidence": 0.87,
+        }
 
     monkeypatch.setattr(graph_module, "generate_stream", fake_generate_stream)
     return fake_history
 
 
 TEST_MODEL = "llama3.2:3b"
+
+CITATION = {
+    "file_id": "file-1",
+    "filename": "corpus.csv",
+    "unit_kind": "row",
+    "unit_index": 42,
+    "label": "row 42",
+    "url": None,
+}
 
 
 def test_ask_stream_emits_stages_then_tokens_then_done(streaming):
@@ -97,8 +111,9 @@ def test_ask_stream_done_carries_the_answer_and_timings(streaming):
     assert done["type"] == "done"
     assert done["id"] == "entry-1"
     assert done["answer"] == "the answer"
-    assert done["sources"] == ["a.txt"]
+    assert done["citations"] == [CITATION]
     assert done["refused"] is False
+    assert done["confidence"] == 0.87
     assert done["model"] == TEST_MODEL
     assert isinstance(done["latency_ms"], float)
     assert "rerank_ms" in done and "generate_ms" in done
@@ -110,7 +125,8 @@ def test_ask_stream_records_the_completed_answer(streaming):
     entry_id, values = streaming.completed
     assert entry_id == "entry-1"
     assert values["answer"] == "the answer"
-    assert values["sources"] == ["a.txt"]
+    assert values["citations"] == [CITATION]
+    assert values["confidence"] == 0.87
 
 
 def test_ask_stream_raises_for_an_unrecognized_model(streaming):
@@ -131,16 +147,81 @@ def test_ask_stream_passes_a_known_model_through(streaming):
     assert done["model"] == "qwen3:4b"
 
 
-def test_ask_stream_marks_a_refusal_when_there_are_no_sources(monkeypatch, streaming):
+@pytest.fixture
+def direct(monkeypatch):
+    """Stub direct_answer; ask_direct must never touch history or the graph."""
+    monkeypatch.setattr(
+        graph_module,
+        "direct_answer",
+        lambda model, query: {
+            "answer": "raw answer",
+            "generate_ms": 123.4,
+            "eval_count": 10,
+            "tokens_per_sec": 42.0,
+        },
+    )
+
+
+def test_ask_direct_returns_the_answer_and_timings(direct):
+    result = graph_module.ask_direct("q", model=TEST_MODEL)
+
+    assert result["answer"] == "raw answer"
+    assert result["model"] == TEST_MODEL
+    assert result["tokens_per_sec"] == 42.0
+    assert result["eval_count"] == 10
+    assert isinstance(result["latency_ms"], float)
+
+
+def test_ask_direct_raises_for_an_unrecognized_model(direct):
+    with pytest.raises(ValueError, match="model is required"):
+        graph_module.ask_direct("q", model="gpt-4")
+
+
+def test_ask_direct_never_touches_history(direct, monkeypatch):
+    fake_history = FakeHistory()
+    monkeypatch.setattr(graph_module, "history", fake_history)
+
+    graph_module.ask_direct("q", model=TEST_MODEL)
+
+    assert fake_history.completed is None
+    assert fake_history.failed is None
+
+
+def test_ask_stream_reports_the_refusal_the_generator_declared(monkeypatch, streaming):
     def refusing_stream(state):
         yield "no context"
-        return {"answer": "no context", "sources": []}
+        return {"answer": "no context", "citations": [], "refused": True, "confidence": 0.0}
 
     monkeypatch.setattr(graph_module, "generate_stream", refusing_stream)
 
     done = list(graph_module.ask_stream("q", model=TEST_MODEL))[-1]
 
     assert done["refused"] is True
+
+
+def test_an_answer_with_no_citable_chunks_is_not_reported_as_a_refusal(
+    monkeypatch, streaming
+):
+    """Chunks ingested before provenance existed ground an answer uncitably.
+
+    The old rule read refusal off an empty citation list, which turned every
+    such answer into a refusal in the UI and in the history table.
+    """
+    def uncitable_stream(state):
+        yield "the answer"
+        return {
+            "answer": "the answer",
+            "citations": [],
+            "refused": False,
+            "confidence": 0.71,
+        }
+
+    monkeypatch.setattr(graph_module, "generate_stream", uncitable_stream)
+
+    done = list(graph_module.ask_stream("q", model=TEST_MODEL))[-1]
+
+    assert done["refused"] is False
+    assert done["citations"] == []
 
 
 def test_ask_stream_closing_early_records_the_partial_answer(streaming):

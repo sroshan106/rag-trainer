@@ -14,7 +14,7 @@ import {
   Loader2,
 } from "lucide-react";
 import StatusBadge from "../components/StatusBadge.jsx";
-import { listModelCatalog, pullModel, pullHistory, pollJob, deleteModel } from "../api.js";
+import { listModelCatalog, pullModel, pullHistory, pollJob, deleteModel, cancelJob } from "../api.js";
 
 const DEFAULT_MODEL_METADATA = {
   "llama3.2:3b": {
@@ -58,48 +58,6 @@ const DEFAULT_MODEL_METADATA = {
     params: "3.8B",
     context: "128k ctx",
     description: "Microsoft compact reasoning model with high benchmark performance.",
-  },
-  "nomic-embed-text": {
-    min_vram: "500 MB",
-    disk_size: "~274 MB",
-    params: "137M",
-    context: "8192 ctx • 768 dim",
-    description: "Default embedding model for vectorstore retrieval with large context window.",
-  },
-  "all-minilm": {
-    min_vram: "250 MB",
-    disk_size: "~120 MB",
-    params: "33M",
-    context: "256 ctx • 384 dim",
-    description: "Extremely fast, lightweight sentence embeddings.",
-  },
-  "bge-m3": {
-    min_vram: "1.5 GB",
-    disk_size: "~1.2 GB",
-    params: "568M",
-    context: "8192 ctx • 1024 dim",
-    description: "Multilingual embeddings supporting dense, sparse, and multi-vector search.",
-  },
-  "bge-small": {
-    min_vram: "200 MB",
-    disk_size: "~67 MB",
-    params: "24M",
-    context: "512 ctx • 384 dim",
-    description: "Minimal memory footprint embedding model for resource-constrained setups.",
-  },
-  "mxbai-embed-large": {
-    min_vram: "1.0 GB",
-    disk_size: "~670 MB",
-    params: "335M",
-    context: "512 ctx • 1024 dim",
-    description: "High retrieval accuracy representation model for English corpus.",
-  },
-  "snowflake-arctic-embed": {
-    min_vram: "1.0 GB",
-    disk_size: "~669 MB",
-    params: "335M",
-    context: "512 ctx • 1024 dim",
-    description: "Enterprise-grade retrieval embedding model by Snowflake.",
   },
   "cross-encoder/ms-marco-MiniLM-L-6-v2": {
     min_vram: "300 MB",
@@ -156,8 +114,8 @@ const DEFAULT_RERANK_CATALOG = [
 
 const TABS = [
   { key: "chat", label: "Chat Models", icon: Cpu },
-  { key: "embed", label: "Embeddings", icon: Database },
   { key: "rerank", label: "Rerankers", icon: Layers },
+  { key: "embed", label: "Embeddings", icon: Database },
 ];
 
 export default function Settings() {
@@ -217,6 +175,13 @@ export default function Settings() {
       .catch((err) => setError(err.message));
   }
 
+  function cancelDownload(model) {
+    const job = jobs[model];
+    if (!job) return;
+    setError(null);
+    cancelJob(job.id).catch((err) => setError(err.message));
+  }
+
   async function confirmDelete(model) {
     setError(null);
     setDeletingModel(model);
@@ -241,15 +206,6 @@ export default function Settings() {
       subtitle: "Downloaded models are instantly available in Ask and Benchmark views",
       rows: data?.catalog.map((m) => ({ name: m, installed: data.installed.includes(m) })),
     },
-    embed: {
-      title: "Vector Embedding Models",
-      subtitle: data ? `Active vector embedding model: ${data.active_embed_model || "nomic-embed-text"}` : "Downloadable models for vectorizing document chunks",
-      rows: data?.embed_models.map((m) => ({
-        name: m,
-        installed: data.embed_installed.includes(m),
-        active: (data.active_embed_model || "nomic-embed-text") === m,
-      })),
-    },
     rerank: {
       title: "Cross-Encoder Reranker Models",
       subtitle: data ? `Status: ${data.rerank_enabled ? "Enabled" : "Disabled"} (Active model: ${data.active_rerank_model || data.rerank_model})` : "Pre-download cross-encoder models from HuggingFace to cache locally",
@@ -266,15 +222,15 @@ export default function Settings() {
   return (
     <div className="flex flex-col gap-6 max-w-4xl mx-auto">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-100">Model Management</h1>
-        <p className="text-sm text-slate-400 mt-1">
+        <h1 className="text-2xl font-bold tracking-tight text-ink">Model Management</h1>
+        <p className="text-sm text-ink-3 mt-1">
           Download and manage LLM generators, embedding models, and cross-encoders
         </p>
       </div>
 
       {error && (
-        <div className="rounded-xl border border-rose-800/80 bg-rose-950/40 p-4 text-sm text-rose-300 flex items-start gap-3">
-          <AlertCircle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-rose-700 shrink-0 mt-0.5" />
           <div className="flex-1">
             <span className="font-semibold">Error: </span>
             {error}
@@ -282,7 +238,7 @@ export default function Settings() {
         </div>
       )}
 
-      <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#111726]/90 border border-slate-800 self-start">
+      <div className="flex items-center gap-1.5 p-1 rounded-xl bg-surface border border-hairline self-start">
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.key;
@@ -293,8 +249,8 @@ export default function Settings() {
               onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 isActive
-                  ? "bg-blue-600 text-white shadow-sm shadow-blue-500/20"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+                  ? "bg-accent text-white shadow-sm shadow-accent/20"
+                  : "text-ink-3 hover:text-ink hover:bg-surface-2"
               }`}
             >
               <Icon className="h-3.5 w-3.5" />
@@ -304,28 +260,33 @@ export default function Settings() {
         })}
       </div>
 
-      {currentTab && (
-        <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
-          <div className="mb-4 pb-3 border-b border-slate-800/80">
-            <h2 className="text-base font-bold text-slate-100">{currentTab.title}</h2>
-            <p className="text-xs text-slate-400 mt-0.5">{currentTab.subtitle}</p>
+      {activeTab === "embed" ? (
+        <EmbedInfoPanel model={data?.active_embed_model || "nomic-embed-text"} info={infoMap[data?.active_embed_model || "nomic-embed-text"]} />
+      ) : (
+        currentTab && (
+          <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
+            <div className="mb-4 pb-3 border-b border-hairline">
+              <h2 className="text-base font-bold text-ink">{currentTab.title}</h2>
+              <p className="text-xs text-ink-3 mt-0.5">{currentTab.subtitle}</p>
+            </div>
+            <ModelTable
+              rows={currentTab.rows}
+              infoMap={infoMap}
+              job={(m) => jobs[m]}
+              onDownload={download}
+              onCancel={cancelDownload}
+              onDeleteRequest={(row, info) => setModelToDelete({ name: row.name, active: row.active, info })}
+              deletingModel={deletingModel}
+            />
           </div>
-          <ModelTable
-            rows={currentTab.rows}
-            infoMap={infoMap}
-            job={(m) => jobs[m]}
-            onDownload={download}
-            onDeleteRequest={(row, info) => setModelToDelete({ name: row.name, active: row.active, info })}
-            deletingModel={deletingModel}
-          />
-        </div>
+        )
       )}
 
       {/* Delete Confirmation Warning Modal */}
       {modelToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/25 backdrop-blur-sm animate-in fade-in duration-200">
           <div
-            className="relative w-full max-w-md rounded-2xl border border-slate-800 bg-[#111726] p-6 shadow-2xl shadow-black/80"
+            className="relative w-full max-w-md rounded-2xl border border-hairline bg-surface p-6 shadow-2xl shadow-ink/10"
             role="dialog"
             aria-modal="true"
           >
@@ -333,34 +294,34 @@ export default function Settings() {
               type="button"
               onClick={() => setModelToDelete(null)}
               disabled={!!deletingModel}
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800/60 transition-colors"
+              className="absolute top-4 right-4 text-ink-3 hover:text-ink p-1.5 rounded-lg hover:bg-surface-2 transition-colors"
             >
               <X className="h-4 w-4" />
             </button>
 
             <div className="flex items-start gap-4">
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0">
-                <AlertTriangle className="h-6 w-6 text-amber-400" />
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 shrink-0">
+                <AlertTriangle className="h-6 w-6 text-amber-700" />
               </div>
 
               <div className="flex-1 min-w-0">
-                <h3 className="text-lg font-bold text-slate-100">Delete Model</h3>
-                <p className="text-sm text-slate-300 mt-1">
-                  Are you sure you want to delete <span className="font-mono font-semibold text-amber-300 bg-slate-800/80 px-1.5 py-0.5 rounded">{modelToDelete.name}</span> from local disk?
+                <h3 className="text-lg font-bold text-ink">Delete Model</h3>
+                <p className="text-sm text-ink-2 mt-1">
+                  Are you sure you want to delete <span className="font-mono font-semibold text-amber-700 bg-surface-2 px-1.5 py-0.5 rounded">{modelToDelete.name}</span> from local disk?
                 </p>
                 {modelToDelete.info?.disk_size && (
-                  <p className="text-xs text-slate-400 mt-1.5">
-                    This will remove approximately <span className="font-mono text-slate-300 font-medium">{modelToDelete.info.disk_size}</span> of disk space.
+                  <p className="text-xs text-ink-3 mt-1.5">
+                    This will remove approximately <span className="font-mono text-ink-2 font-medium">{modelToDelete.info.disk_size}</span> of disk space.
                   </p>
                 )}
               </div>
             </div>
 
             {modelToDelete.active && (
-              <div className="mt-4 flex items-start gap-2.5 p-3 rounded-xl bg-amber-950/40 border border-amber-800/60 text-amber-300 text-xs">
-                <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="mt-4 flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-xs">
+                <AlertTriangle className="h-4 w-4 text-amber-700 shrink-0 mt-0.5" />
                 <div>
-                  <span className="font-semibold text-amber-200">Active Model Warning:</span> This model is currently configured as active. Deleting it may cause operations to fail until another active model is configured.
+                  <span className="font-semibold text-amber-700">Active Model Warning:</span> This model is currently configured as active. Deleting it may cause operations to fail until another active model is configured.
                 </div>
               </div>
             )}
@@ -370,7 +331,7 @@ export default function Settings() {
                 type="button"
                 disabled={!!deletingModel}
                 onClick={() => setModelToDelete(null)}
-                className="px-4 py-2 text-xs font-medium rounded-lg text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 transition-all cursor-pointer disabled:opacity-50"
+                className="px-4 py-2 text-xs font-medium rounded-lg text-ink-2 hover:text-ink bg-surface-2 hover:bg-surface-3 border border-hairline transition-all cursor-pointer disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -400,10 +361,53 @@ export default function Settings() {
   );
 }
 
-function ModelTable({ rows, infoMap, job, onDownload, onDeleteRequest, deletingModel }) {
-  if (!rows) return <div className="py-8 text-center text-xs text-slate-500">Loading catalog...</div>;
+function EmbedInfoPanel({ model, info }) {
   return (
-    <div className="flex flex-col divide-y divide-slate-800/70">
+    <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
+      <div className="mb-4 pb-3 border-b border-hairline">
+        <h2 className="text-base font-bold text-ink">Vector Embedding Model</h2>
+        <p className="text-xs text-ink-3 mt-0.5">
+          Set once via <code className="font-mono text-ink-2">RAG_EMBED_MODEL</code> and fixed for the
+          life of the collection -- every stored chunk was embedded with it, so switching models here isn't
+          offered: it would mix incompatible vector dimensions in the same vectorstore and corrupt
+          similarity search. Changing it requires re-ingesting everything.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-sm font-bold text-ink">{model}</span>
+        {info?.min_vram && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-accent-soft text-accent border border-accent-line">
+            <Zap className="h-3 w-3" />
+            {info.min_vram}
+          </span>
+        )}
+        {info?.disk_size && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono text-ink-3 bg-surface border border-hairline">
+            <HardDrive className="h-3 w-3 text-ink-4" />
+            {info.disk_size}
+          </span>
+        )}
+        {info?.params && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono text-ink-3 bg-surface border border-hairline">
+            {info.params}
+          </span>
+        )}
+      </div>
+      {(info?.context || info?.description) && (
+        <div className="mt-1 text-xs text-ink-3 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          {info?.context && <span className="font-mono text-ink-2">{info.context}</span>}
+          {info?.context && info?.description && <span className="text-ink-4">•</span>}
+          {info?.description && <span>{info.description}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ModelTable({ rows, infoMap, job, onDownload, onCancel, onDeleteRequest, deletingModel }) {
+  if (!rows) return <div className="py-8 text-center text-xs text-ink-4">Loading catalog...</div>;
+  return (
+    <div className="flex flex-col divide-y divide-hairline">
       {rows.map((row) => (
         <ModelRow
           key={row.name}
@@ -411,6 +415,7 @@ function ModelTable({ rows, infoMap, job, onDownload, onDeleteRequest, deletingM
           info={infoMap?.[row.name]}
           job={job(row.name)}
           onDownload={onDownload}
+          onCancel={onCancel}
           onDeleteRequest={onDeleteRequest}
           deletingModel={deletingModel}
         />
@@ -419,7 +424,7 @@ function ModelTable({ rows, infoMap, job, onDownload, onDeleteRequest, deletingM
   );
 }
 
-function ModelRow({ row, info, job, onDownload, onDeleteRequest, deletingModel }) {
+function ModelRow({ row, info, job, onDownload, onCancel, onDeleteRequest, deletingModel }) {
   const busy = job && ["pending", "running"].includes(job.status);
   const minVram = info?.min_vram;
   const diskSize = info?.disk_size;
@@ -432,56 +437,56 @@ function ModelRow({ row, info, job, onDownload, onDeleteRequest, deletingModel }
     <div className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-sm font-bold text-slate-100">{row.name}</span>
+          <span className="font-mono text-sm font-bold text-ink">{row.name}</span>
 
           {row.active && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
               Active
             </span>
           )}
           {minVram && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-blue-950/60 text-blue-300 border border-blue-800/60">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-accent-soft text-accent border border-accent-line">
               <Zap className="h-3 w-3" />
               {minVram}
             </span>
           )}
           {diskSize && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono text-slate-400 bg-slate-900/80 border border-slate-800">
-              <HardDrive className="h-3 w-3 text-slate-500" />
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono text-ink-3 bg-surface border border-hairline">
+              <HardDrive className="h-3 w-3 text-ink-4" />
               {diskSize}
             </span>
           )}
           {params && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono text-slate-400 bg-slate-900/80 border border-slate-800">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono text-ink-3 bg-surface border border-hairline">
               {params}
             </span>
           )}
         </div>
 
         {(context || description) && (
-          <div className="mt-1 text-xs text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            {context && <span className="font-mono text-slate-300">{context}</span>}
-            {context && description && <span className="text-slate-600">•</span>}
+          <div className="mt-1 text-xs text-ink-3 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            {context && <span className="font-mono text-ink-2">{context}</span>}
+            {context && description && <span className="text-ink-4">•</span>}
             {description && <span>{description}</span>}
           </div>
         )}
 
         {busy && (
           <div className="mt-2.5 max-w-sm">
-            <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+            <div className="h-1.5 w-full rounded-full bg-surface-2 overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-all"
+                className="h-full bg-gradient-to-r from-accent to-accent-strong transition-all"
                 style={{ width: `${Math.round((job.progress ?? 0) * 100)}%` }}
               />
             </div>
-            <div className="text-[11px] text-slate-400 mt-1 truncate">{job.message}</div>
+            <div className="text-[11px] text-ink-3 mt-1 truncate">{job.message}</div>
           </div>
         )}
 
         {job && !busy && job.status !== "done" && (
           <div className="text-xs mt-1.5">
             <StatusBadge status={job.status} />
-            {job.error && <span className="ml-2 text-rose-400">{job.error}</span>}
+            {job.error && <span className="ml-2 text-rose-700">{job.error}</span>}
           </div>
         )}
       </div>
@@ -489,8 +494,8 @@ function ModelRow({ row, info, job, onDownload, onDeleteRequest, deletingModel }
       <div className="flex-shrink-0 flex items-center gap-2 self-start sm:self-center">
         {row.installed ? (
           <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />
               <span>Installed</span>
             </span>
             <button
@@ -498,22 +503,35 @@ function ModelRow({ row, info, job, onDownload, onDeleteRequest, deletingModel }
               disabled={busy || isDeleting}
               onClick={() => onDeleteRequest?.(row, info)}
               title="Delete model from disk"
-              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg text-rose-400 hover:text-rose-200 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 hover:border-rose-700/80 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg text-rose-700 hover:text-rose-700 bg-rose-50 hover:bg-rose-50 border border-rose-200 hover:border-rose-200 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
             >
-              <Trash2 className="h-3.5 w-3.5 text-rose-400" />
+              <Trash2 className="h-3.5 w-3.5 text-rose-700" />
               <span>{isDeleting ? "Deleting..." : "Delete"}</span>
             </button>
           </div>
         ) : (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onDownload(row.name)}
-            className="inline-flex items-center gap-1.5 text-xs font-medium px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-all shadow-sm shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            <DownloadCloud className="h-3.5 w-3.5" />
-            <span>{busy ? "Downloading..." : "Download"}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onDownload(row.name)}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-4 py-2 rounded-lg bg-accent hover:bg-accent-strong text-white transition-all shadow-sm shadow-accent/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <DownloadCloud className="h-3.5 w-3.5" />
+              <span>{busy ? "Downloading..." : "Download"}</span>
+            </button>
+            {busy && (
+              <button
+                type="button"
+                onClick={() => onCancel?.(row.name)}
+                title="Cancel download"
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-2 rounded-lg text-rose-700 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-all cursor-pointer shadow-sm"
+              >
+                <X className="h-3.5 w-3.5 text-rose-700" />
+                <span>Cancel</span>
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
