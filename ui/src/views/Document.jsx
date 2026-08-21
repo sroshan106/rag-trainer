@@ -14,18 +14,18 @@ export default function DocumentPage() {
       <div>
         <Link
           to="/ingest"
-          className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors mb-3"
+          className="inline-flex items-center gap-1.5 text-xs text-ink-3 hover:text-ink transition-colors mb-3"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           Knowledge base
         </Link>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-100">Document</h1>
-        <p className="text-sm text-slate-400 mt-1">
+        <h1 className="text-2xl font-bold tracking-tight text-ink">Document</h1>
+        <p className="text-sm text-ink-3 mt-1">
           The text as it was ingested and embedded
         </p>
       </div>
 
-      <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
+      <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
         <DocumentView
           fileId={fileId}
           focusIndex={Number.isNaN(focusIndex) ? null : focusIndex}

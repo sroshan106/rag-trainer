@@ -312,19 +312,19 @@ export default function Benchmark() {
     <div className="flex flex-col gap-6 max-w-4xl mx-auto">
       {/* Page Header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-100">Benchmark Suite</h1>
-        <p className="text-sm text-slate-400 mt-1">
+        <h1 className="text-2xl font-bold tracking-tight text-ink">Benchmark Suite</h1>
+        <p className="text-sm text-ink-3 mt-1">
           Evaluate pipeline answer overlap, refusal precision, and latencies across test suites
         </p>
       </div>
 
       {modelsLoaded && models.length === 0 && (
-        <div className="rounded-xl border border-amber-800/80 bg-amber-950/30 p-4 text-sm text-amber-300 flex items-start gap-3">
-          <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-700 shrink-0 mt-0.5" />
           <div className="flex-1">
             <p>
               No chat model is downloaded yet.{" "}
-              <Link to="/settings" className="font-semibold underline hover:text-amber-200">
+              <Link to="/settings" className="font-semibold underline hover:text-amber-700">
                 Download one in Settings
               </Link>{" "}
               first to run benchmarks.
@@ -334,20 +334,20 @@ export default function Benchmark() {
       )}
 
       {/* Config Card */}
-      <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800/80">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-            <Sliders className="h-4 w-4 text-blue-400" />
+      <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-hairline">
+          <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <Sliders className="h-4 w-4 text-accent" />
             <span>Benchmark Configuration</span>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 font-medium">Presets:</span>
+            <span className="text-xs text-ink-4 font-medium">Presets:</span>
             <button
               type="button"
               onClick={() => applyPreset("quick")}
               disabled={running}
-              className="px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+              className="px-2.5 py-1 rounded-lg border border-hairline bg-surface-2 hover:bg-surface-3 text-ink-2 text-xs font-medium transition-colors"
             >
               ⚡ Quick Test (5)
             </button>
@@ -355,7 +355,7 @@ export default function Benchmark() {
               type="button"
               onClick={() => applyPreset("full")}
               disabled={running}
-              className="px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+              className="px-2.5 py-1 rounded-lg border border-hairline bg-surface-2 hover:bg-surface-3 text-ink-2 text-xs font-medium transition-colors"
             >
               🔬 Full Eval
             </button>
@@ -369,15 +369,15 @@ export default function Benchmark() {
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
                 disabled={running}
-                className="w-full appearance-none rounded-lg border border-slate-700/80 bg-slate-900/90 text-slate-200 px-3 py-2 pr-8 text-xs font-mono font-medium focus:outline-none focus:border-blue-500 transition-colors cursor-pointer"
+                className="w-full appearance-none rounded-lg border border-hairline bg-surface text-ink px-3 py-2 pr-8 text-xs font-mono font-medium focus:outline-none focus:border-accent-line transition-colors cursor-pointer"
               >
                 {models.map((m) => (
-                  <option key={m} value={m} className="bg-[#111726] text-slate-200">
+                  <option key={m} value={m} className="bg-surface text-ink">
                     {m}
                   </option>
                 ))}
               </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-ink-3">
                 <span className="text-[10px]">▼</span>
               </div>
             </div>
@@ -391,7 +391,7 @@ export default function Benchmark() {
               value={workers}
               disabled={running}
               onChange={(e) => setWorkers(e.target.value)}
-              className="w-full rounded-lg border border-slate-700/80 bg-slate-900/90 text-slate-200 px-3 py-2 text-xs font-medium focus:outline-none focus:border-blue-500"
+              className="w-full rounded-lg border border-hairline bg-surface text-ink px-3 py-2 text-xs font-medium focus:outline-none focus:border-accent-line"
             />
           </Field>
 
@@ -403,7 +403,7 @@ export default function Benchmark() {
               value={sample}
               disabled={running}
               onChange={(e) => setSample(e.target.value)}
-              className="w-full rounded-lg border border-slate-700/80 bg-slate-900/90 text-slate-200 px-3 py-2 text-xs font-medium focus:outline-none focus:border-blue-500"
+              className="w-full rounded-lg border border-hairline bg-surface text-ink px-3 py-2 text-xs font-medium focus:outline-none focus:border-accent-line"
             />
           </Field>
 
@@ -415,19 +415,19 @@ export default function Benchmark() {
               value={chunkSize}
               disabled={running}
               onChange={(e) => setChunkSize(e.target.value)}
-              className="w-full rounded-lg border border-slate-700/80 bg-slate-900/90 text-slate-200 px-3 py-2 text-xs font-medium focus:outline-none focus:border-blue-500"
+              className="w-full rounded-lg border border-hairline bg-surface text-ink px-3 py-2 text-xs font-medium focus:outline-none focus:border-accent-line"
             />
           </Field>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-slate-800/80">
-          <label className="flex items-center gap-2 text-xs font-medium text-slate-300 cursor-pointer select-none">
+        <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-hairline">
+          <label className="flex items-center gap-2 text-xs font-medium text-ink-2 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={useCache}
               disabled={running}
               onChange={(e) => setUseCache(e.target.checked)}
-              className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-0"
+              className="rounded border-hairline bg-surface text-accent focus:ring-0"
             />
             <span>Use caching (skip repeating queries if cached)</span>
           </label>
@@ -436,7 +436,7 @@ export default function Benchmark() {
             <button
               onClick={onStart}
               disabled={running || !model || testSuites.length === 0 || selectedSuites.length === 0}
-              className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 text-sm font-medium transition-all shadow-sm shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              className="flex items-center gap-2 rounded-lg bg-accent hover:bg-accent-strong text-white px-5 py-2 text-sm font-medium transition-all shadow-sm shadow-accent/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               <Play className="h-4 w-4" />
               <span>{running ? "Running..." : "Run Benchmark"}</span>
@@ -445,7 +445,7 @@ export default function Benchmark() {
               <button
                 onClick={onStop}
                 disabled={stopping}
-                className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 text-sm font-medium transition-colors"
+                className="flex items-center gap-1.5 rounded-lg border border-hairline bg-surface-2 hover:bg-surface-3 text-ink px-4 py-2 text-sm font-medium transition-colors"
               >
                 <Square className="h-3.5 w-3.5" />
                 <span>{stopping ? "Stopping..." : "Stop"}</span>
@@ -456,12 +456,12 @@ export default function Benchmark() {
       </div>
 
       {/* Test Suites Management Card */}
-      <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800/80">
+      <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-hairline">
           <div className="flex items-center gap-2">
-            <Layers className="h-4 w-4 text-blue-400" />
-            <span className="text-sm font-semibold text-slate-200">Evaluation Test Suites</span>
-            <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-blue-950/60 text-blue-300 border border-blue-800/60">
+            <Layers className="h-4 w-4 text-accent" />
+            <span className="text-sm font-semibold text-ink">Evaluation Test Suites</span>
+            <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-accent-soft text-accent border border-accent-line">
               {selectedSuites.length} of {testSuites.length} selected
             </span>
           </div>
@@ -470,14 +470,14 @@ export default function Benchmark() {
             <button
               type="button"
               onClick={() => setSelectedSuites(testSuites.map((s) => s.id))}
-              className="px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+              className="px-2.5 py-1 rounded-lg border border-hairline bg-surface-2 hover:bg-surface-3 text-ink-2 text-xs font-medium transition-colors"
             >
               Select All
             </button>
             <button
               type="button"
               onClick={() => setSelectedSuites([])}
-              className="px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-400 text-xs font-medium transition-colors"
+              className="px-2.5 py-1 rounded-lg border border-hairline bg-surface-2 hover:bg-surface-3 text-ink-3 text-xs font-medium transition-colors"
             >
               Deselect All
             </button>
@@ -487,7 +487,7 @@ export default function Benchmark() {
                 setShowUploadModal(true);
                 setUploadError(null);
               }}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-accent hover:bg-accent-strong text-white text-xs font-medium transition-colors shadow-sm"
             >
               <Plus className="h-3.5 w-3.5" />
               <span>Upload Custom Suite</span>
@@ -496,7 +496,7 @@ export default function Benchmark() {
         </div>
 
         {testSuites.length === 0 ? (
-          <div className="py-8 text-center text-xs text-slate-500">
+          <div className="py-8 text-center text-xs text-ink-4">
             No test suites available. Click "Upload Custom Suite" to add a CSV test set.
           </div>
         ) : (
@@ -510,8 +510,8 @@ export default function Benchmark() {
                   key={suite.id}
                   className={`flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl border transition-all ${
                     isSelected
-                      ? "border-slate-700/80 bg-slate-900/60"
-                      : "border-slate-800/60 bg-slate-900/20 opacity-75"
+                      ? "border-hairline bg-surface-2"
+                      : "border-hairline bg-surface-2 opacity-75"
                   }`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -526,35 +526,35 @@ export default function Benchmark() {
                           setSelectedSuites((prev) => prev.filter((id) => id !== suite.id));
                         }
                       }}
-                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-0 h-4 w-4 cursor-pointer"
+                      className="rounded border-hairline bg-surface text-accent focus:ring-0 h-4 w-4 cursor-pointer"
                     />
 
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-800/80 border border-slate-700/60 text-slate-300">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-2 border border-hairline text-ink-2">
                       <FileSpreadsheet className="h-4 w-4" />
                     </div>
 
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-xs text-slate-200 truncate">
+                        <span className="font-semibold text-xs text-ink truncate">
                           {suite.name}
                         </span>
-                        <span className="px-1.5 py-0.2 rounded text-[10px] font-medium border bg-indigo-950/70 text-indigo-300 border-indigo-800/60 capitalize">
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-medium border bg-accent-soft text-accent border-accent-line capitalize">
                           {suite.suite_type.replace("_", " ")}
                         </span>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-slate-400 mt-0.5">
+                      <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-ink-3 mt-0.5">
                         <span>{suite.questions} questions</span>
                         {suite.question_col && (
                           <>
                             <span>•</span>
-                            <span className="text-slate-500 font-mono text-[10px]">
-                              Q: <span className="text-slate-300">{suite.question_col}</span>
+                            <span className="text-ink-4 font-mono text-[10px]">
+                              Q: <span className="text-ink-2">{suite.question_col}</span>
                               {suite.answer_col && (
-                                <> | A: <span className="text-slate-300">{suite.answer_col}</span></>
+                                <> | A: <span className="text-ink-2">{suite.answer_col}</span></>
                               )}
                               {suite.doc_index_col && (
-                                <> | Doc: <span className="text-slate-300">{suite.doc_index_col}</span></>
+                                <> | Doc: <span className="text-ink-2">{suite.doc_index_col}</span></>
                               )}
                             </span>
                           </>
@@ -567,7 +567,7 @@ export default function Benchmark() {
                     type="button"
                     disabled={running || isDeleting}
                     onClick={() => onDeleteSuite(suite.id)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 transition-colors"
+                    className="p-1.5 rounded-lg text-ink-3 hover:text-rose-700 hover:bg-rose-50 transition-colors"
                     title="Delete test suite"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -581,25 +581,25 @@ export default function Benchmark() {
 
       {/* Upload Custom Suite Modal */}
       {showUploadModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="relative w-full max-w-lg rounded-2xl border border-slate-700/80 bg-[#111726] p-6 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/25 backdrop-blur-sm">
+          <div className="relative w-full max-w-lg rounded-2xl border border-hairline bg-surface p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-hairline">
               <div className="flex items-center gap-2">
-                <FileSpreadsheet className="h-5 w-5 text-blue-400" />
-                <h3 className="text-sm font-bold text-slate-100">Upload Benchmark Test Suite</h3>
+                <FileSpreadsheet className="h-5 w-5 text-accent" />
+                <h3 className="text-sm font-bold text-ink">Upload Benchmark Test Suite</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowUploadModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                className="p-1 rounded-lg text-ink-3 hover:text-ink hover:bg-surface-2 transition-colors"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             {uploadError && (
-              <div className="mt-4 rounded-xl border border-rose-800/80 bg-rose-950/40 p-3 text-xs text-rose-300 flex items-start gap-2">
-                <AlertCircle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
+              <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-rose-700 shrink-0 mt-0.5" />
                 <div>{uploadError}</div>
               </div>
             )}
@@ -607,7 +607,7 @@ export default function Benchmark() {
             <form onSubmit={onSaveCustomSuite} className="mt-4 flex flex-col gap-4">
               {/* File Drop / Select Area */}
               <div>
-                <label className="text-xs font-medium text-slate-300 block mb-1.5">
+                <label className="text-xs font-medium text-ink-2 block mb-1.5">
                   Select CSV File
                 </label>
                 <input
@@ -619,13 +619,13 @@ export default function Benchmark() {
                 />
                 <div
                   onClick={() => uploadFileInputRef.current?.click()}
-                  className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-900/40 hover:bg-slate-900/70 p-4 cursor-pointer transition-colors"
+                  className="flex flex-col items-center justify-center rounded-xl border border-dashed border-hairline bg-surface-2 hover:bg-surface-2 p-4 cursor-pointer transition-colors"
                 >
-                  <UploadCloud className="h-6 w-6 text-slate-400 mb-1" />
-                  <p className="text-xs font-medium text-slate-200">
+                  <UploadCloud className="h-6 w-6 text-ink-3 mb-1" />
+                  <p className="text-xs font-medium text-ink">
                     {uploadFile ? uploadFile.name : "Click to select benchmark CSV"}
                   </p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">
+                  <p className="text-[10px] text-ink-4 mt-0.5">
                     {uploadFile ? `${uploadHeaders.length} columns detected` : "CSV format up to 50MB"}
                   </p>
                 </div>
@@ -633,9 +633,9 @@ export default function Benchmark() {
 
               {/* Column Mapping Section */}
               {uploadHeaders.length > 0 && (
-                <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3.5 flex flex-col gap-3">
-                  <span className="text-xs font-semibold text-slate-200">Column Matching</span>
-                  <p className="text-[11px] text-slate-400">
+                <div className="rounded-xl border border-hairline bg-surface-2 p-3.5 flex flex-col gap-3">
+                  <span className="text-xs font-semibold text-ink">Column Matching</span>
+                  <p className="text-[11px] text-ink-3">
                     Map CSV headers to benchmark question and answer fields.
                   </p>
 
@@ -645,7 +645,7 @@ export default function Benchmark() {
                         value={questionCol}
                         onChange={(e) => setQuestionCol(e.target.value)}
                         required
-                        className="w-full appearance-none rounded-lg border border-slate-700/80 bg-slate-900 text-slate-200 px-3 py-1.5 pr-8 text-xs font-mono focus:outline-none focus:border-blue-500 cursor-pointer"
+                        className="w-full appearance-none rounded-lg border border-hairline bg-surface text-ink px-3 py-1.5 pr-8 text-xs font-mono focus:outline-none focus:border-accent-line cursor-pointer"
                       >
                         {uploadHeaders.map((h) => (
                           <option key={h} value={h}>
@@ -653,7 +653,7 @@ export default function Benchmark() {
                           </option>
                         ))}
                       </select>
-                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-ink-3">
                         <span className="text-[10px]">▼</span>
                       </div>
                     </div>
@@ -664,7 +664,7 @@ export default function Benchmark() {
                       <select
                         value={answerCol}
                         onChange={(e) => setAnswerCol(e.target.value)}
-                        className="w-full appearance-none rounded-lg border border-slate-700/80 bg-slate-900 text-slate-200 px-3 py-1.5 pr-8 text-xs font-mono focus:outline-none focus:border-blue-500 cursor-pointer"
+                        className="w-full appearance-none rounded-lg border border-hairline bg-surface text-ink px-3 py-1.5 pr-8 text-xs font-mono focus:outline-none focus:border-accent-line cursor-pointer"
                       >
                         <option value="">(None - No Answer / Refusal evaluation)</option>
                         {uploadHeaders.map((h) => (
@@ -673,7 +673,7 @@ export default function Benchmark() {
                           </option>
                         ))}
                       </select>
-                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-ink-3">
                         <span className="text-[10px]">▼</span>
                       </div>
                     </div>
@@ -684,7 +684,7 @@ export default function Benchmark() {
                       <select
                         value={docIndexCol}
                         onChange={(e) => setDocIndexCol(e.target.value)}
-                        className="w-full appearance-none rounded-lg border border-slate-700/80 bg-slate-900 text-slate-200 px-3 py-1.5 pr-8 text-xs font-mono focus:outline-none focus:border-blue-500 cursor-pointer"
+                        className="w-full appearance-none rounded-lg border border-hairline bg-surface text-ink px-3 py-1.5 pr-8 text-xs font-mono focus:outline-none focus:border-accent-line cursor-pointer"
                       >
                         <option value="">(None)</option>
                         {uploadHeaders.map((h) => (
@@ -693,7 +693,7 @@ export default function Benchmark() {
                           </option>
                         ))}
                       </select>
-                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-ink-3">
                         <span className="text-[10px]">▼</span>
                       </div>
                     </div>
@@ -701,19 +701,19 @@ export default function Benchmark() {
                 </div>
               )}
 
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-hairline">
                 <button
                   type="button"
                   onClick={() => setShowUploadModal(false)}
                   disabled={uploading}
-                  className="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+                  className="px-4 py-2 rounded-lg border border-hairline bg-surface-2 hover:bg-surface-3 text-ink-2 text-xs font-medium transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={uploading || !uploadFile || !questionCol}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent hover:bg-accent-strong text-white text-xs font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {uploading ? (
                     <span>Uploading...</span>
@@ -731,8 +731,8 @@ export default function Benchmark() {
       )}
 
       {error && (
-        <div className="rounded-xl border border-rose-800/80 bg-rose-950/40 p-4 text-sm text-rose-300 flex items-start gap-3">
-          <AlertCircle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-rose-700 shrink-0 mt-0.5" />
           <div className="flex-1">
             <span className="font-semibold">Error: </span>
             {error}
@@ -741,12 +741,12 @@ export default function Benchmark() {
       )}
 
       {/* Retrieval Impact Check */}
-      <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
-        <div className="flex items-center gap-2 text-sm font-semibold text-slate-200 mb-1">
-          <GitCompare className="h-4 w-4 text-blue-400" />
+      <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
+        <div className="flex items-center gap-2 text-sm font-semibold text-ink mb-1">
+          <GitCompare className="h-4 w-4 text-accent" />
           <span>Retrieval Impact Check</span>
         </div>
-        <p className="text-xs text-slate-400 mb-4">
+        <p className="text-xs text-ink-3 mb-4">
           Run one query two ways on the same model -- grounded (through retrieval, reranking, and your
           documents) and direct (the model alone, no context) -- to see what retrieval actually
           contributes. Not saved to Ask history.
@@ -759,25 +759,25 @@ export default function Benchmark() {
             onChange={(e) => setCompareText(e.target.value)}
             placeholder="Ask something your documents can answer..."
             disabled={compareLoading}
-            className="w-full resize-none rounded-xl border border-slate-700/80 bg-slate-900/90 px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 transition-all"
+            className="w-full resize-none rounded-xl border border-hairline bg-surface px-4 py-3 text-sm text-ink placeholder-ink-4 focus:outline-none focus:border-accent-line focus:ring-1 focus:ring-accent/40 transition-all"
           />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-slate-400">Model</span>
+              <span className="text-xs font-medium text-ink-3">Model</span>
               <div className="relative">
                 <select
                   value={compareModel}
                   onChange={(e) => setCompareModel(e.target.value)}
                   disabled={compareLoading || models.length === 0}
-                  className="appearance-none rounded-lg border border-slate-700/80 bg-slate-900/90 text-slate-200 px-3 py-1.5 pr-8 text-xs font-mono font-medium focus:outline-none focus:border-blue-500 transition-colors cursor-pointer"
+                  className="appearance-none rounded-lg border border-hairline bg-surface text-ink px-3 py-1.5 pr-8 text-xs font-mono font-medium focus:outline-none focus:border-accent-line transition-colors cursor-pointer"
                 >
                   {models.map((m) => (
-                    <option key={m} value={m} className="bg-[#111726] text-slate-200">
+                    <option key={m} value={m} className="bg-surface text-ink">
                       {m}
                     </option>
                   ))}
                 </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-ink-3">
                   <span className="text-[10px]">▼</span>
                 </div>
               </div>
@@ -786,7 +786,7 @@ export default function Benchmark() {
               type="button"
               onClick={onCompare}
               disabled={compareLoading || !compareText.trim() || !compareModel}
-              className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 text-sm font-medium transition-all shadow-sm shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              className="flex items-center gap-2 rounded-lg bg-accent hover:bg-accent-strong text-white px-5 py-2 text-sm font-medium transition-all shadow-sm shadow-accent/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               <GitCompare className="h-4 w-4" />
               <span>{compareLoading ? "Comparing..." : "Compare"}</span>
@@ -795,8 +795,8 @@ export default function Benchmark() {
         </div>
 
         {compareError && (
-          <div className="mt-4 rounded-xl border border-rose-800/80 bg-rose-950/40 p-4 text-sm text-rose-300 flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
+          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 flex items-start gap-3">
+            <AlertCircle className="h-5 w-5 text-rose-700 shrink-0 mt-0.5" />
             <div className="flex-1">
               <span className="font-semibold">Error: </span>
               {compareError}
@@ -839,11 +839,11 @@ export default function Benchmark() {
 
       {/* Current Run Card */}
       {job && (
-        <Card title="Current Run" className="border-blue-900/60 bg-blue-950/20">
+        <Card title="Current Run" className="border-accent-line bg-accent-soft">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-3">
               <StatusBadge status={job.status} />
-              <span className="text-xs font-medium text-slate-300">{job.message}</span>
+              <span className="text-xs font-medium text-ink-2">{job.message}</span>
             </div>
             <RunParams params={job.params} />
           </div>
@@ -851,7 +851,7 @@ export default function Benchmark() {
           {running && <ProgressBar value={job.progress} />}
           {job.result && <ResultsTable results={job.result} partial={job.status !== "done"} />}
           {job.status === "failed" && (
-            <pre className="mt-3 text-xs text-rose-400 bg-rose-950/40 p-3 rounded-lg border border-rose-900/60 whitespace-pre-wrap font-mono">
+            <pre className="mt-3 text-xs text-rose-700 bg-rose-50 p-3 rounded-lg border border-rose-200 whitespace-pre-wrap font-mono">
               {job.error}
             </pre>
           )}
@@ -859,19 +859,19 @@ export default function Benchmark() {
       )}
 
       {/* History Card */}
-      <div className="rounded-2xl border border-slate-800 bg-[#111726]/90 backdrop-blur-md p-6 shadow-sm">
-        <h2 className="text-base font-bold text-slate-100 mb-1">Benchmark History</h2>
-        <p className="text-xs text-slate-400 mb-4">Past evaluations from this session, newest first</p>
+      <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
+        <h2 className="text-base font-bold text-ink mb-1">Benchmark History</h2>
+        <p className="text-xs text-ink-3 mb-4">Past evaluations from this session, newest first</p>
 
         {history.length === 0 ? (
-          <div className="py-12 text-center text-slate-500 text-xs">
+          <div className="py-12 text-center text-ink-4 text-xs">
             No benchmark runs yet. Configure parameters above and click "Run Benchmark".
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="text-slate-400 border-b border-slate-800 pb-2">
+                <tr className="text-ink-3 border-b border-hairline pb-2">
                   <th className="pb-2.5 pr-4 font-semibold">Date & Time</th>
                   <th className="pb-2.5 pr-4 font-semibold">Model</th>
                   <th className="pb-2.5 pr-4 font-semibold">Status</th>
@@ -880,20 +880,20 @@ export default function Benchmark() {
                   <th className="pb-2.5 text-right font-semibold"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/80">
+              <tbody className="divide-y divide-hairline">
                 {history.map((h) => {
                   const isExpanded = expandedIds.has(h.id);
                   return (
                     <Fragment key={h.id}>
                       <tr
                         onClick={() => toggleExpand(h.id)}
-                        className="hover:bg-slate-900/60 cursor-pointer transition-colors"
+                        className="hover:bg-surface-2 cursor-pointer transition-colors"
                       >
-                        <td className="py-3 pr-4 whitespace-nowrap text-slate-400">
+                        <td className="py-3 pr-4 whitespace-nowrap text-ink-3">
                           {new Date(h.created_at * 1000).toLocaleString()}
                         </td>
                         <td className="py-3 pr-4 whitespace-nowrap">
-                          <span className="font-mono font-medium px-2 py-0.5 rounded-md bg-blue-950/60 text-blue-300 border border-blue-800/60">
+                          <span className="font-mono font-medium px-2 py-0.5 rounded-md bg-accent-soft text-accent border border-accent-line">
                             {h.params?.model || "default"}
                           </span>
                         </td>
@@ -905,7 +905,7 @@ export default function Benchmark() {
                         </td>
                         <td className="py-3 pr-4">
                           {formatMetricsSummary(h.result) || (
-                            <span className="text-slate-500 italic">{h.message || "—"}</span>
+                            <span className="text-ink-4 italic">{h.message || "—"}</span>
                           )}
                         </td>
                         <td className="py-3 text-right whitespace-nowrap">
@@ -915,7 +915,7 @@ export default function Benchmark() {
                               e.stopPropagation();
                               toggleExpand(h.id);
                             }}
-                            className="text-blue-400 hover:text-blue-300 font-medium inline-flex items-center gap-1"
+                            className="text-accent hover:text-accent font-medium inline-flex items-center gap-1"
                           >
                             <span>{isExpanded ? "Hide" : "Details"}</span>
                             {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -923,21 +923,21 @@ export default function Benchmark() {
                         </td>
                       </tr>
                       {isExpanded && (
-                        <tr className="bg-slate-900/30">
+                        <tr className="bg-surface-2">
                           <td colSpan={6} className="px-4 py-3.5">
                             <div className="flex flex-col gap-2">
                               {h.message && h.status !== "done" && (
-                                <div className="text-xs text-slate-400 italic mb-1">
+                                <div className="text-xs text-ink-3 italic mb-1">
                                   Status message: {h.message}
                                 </div>
                               )}
                               {h.result ? (
                                 <ResultsTable results={h.result} partial={h.status !== "done"} />
                               ) : (
-                                <p className="text-xs text-slate-500">No score data recorded.</p>
+                                <p className="text-xs text-ink-4">No score data recorded.</p>
                               )}
                               {h.status === "failed" && h.error && (
-                                <pre className="mt-2 text-xs text-rose-400 bg-rose-950/40 p-3 rounded-lg border border-rose-900/60 whitespace-pre-wrap font-mono">
+                                <pre className="mt-2 text-xs text-rose-700 bg-rose-50 p-3 rounded-lg border border-rose-200 whitespace-pre-wrap font-mono">
                                   {h.error}
                                 </pre>
                               )}
@@ -960,7 +960,7 @@ export default function Benchmark() {
 function formatMetricsSummary(result) {
   if (!result || !Array.isArray(result) || result.length === 0) return null;
   const suitesWithData = result.filter((r) => r.n > 0);
-  if (suitesWithData.length === 0) return <span className="text-xs text-slate-500">0 answered</span>;
+  if (suitesWithData.length === 0) return <span className="text-xs text-ink-4">0 answered</span>;
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
@@ -972,9 +972,9 @@ function formatMetricsSummary(result) {
         const metricEntries = Object.entries(r).filter(([k]) => k !== "name" && k !== "n");
 
         return (
-          <span key={r.name} className="inline-flex items-center gap-1.5 bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-800">
-            <span className="font-semibold text-slate-300 capitalize">{shortName}:</span>
-            <span className="text-slate-400">
+          <span key={r.name} className="inline-flex items-center gap-1.5 bg-surface px-2 py-0.5 rounded-md border border-hairline">
+            <span className="font-semibold text-ink-2 capitalize">{shortName}:</span>
+            <span className="text-ink-3">
               {metricEntries
                 .map(([k, v]) => {
                   const label = k
@@ -1000,20 +1000,20 @@ function RunParams({ params }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
       {workers != null && (
-        <span className="px-2 py-0.5 rounded-md bg-slate-900/80 text-slate-300 border border-slate-800">
+        <span className="px-2 py-0.5 rounded-md bg-surface text-ink-2 border border-hairline">
           {workers}w
         </span>
       )}
-      <span className="px-2 py-0.5 rounded-md bg-slate-900/80 text-slate-300 border border-slate-800">
+      <span className="px-2 py-0.5 rounded-md bg-surface text-ink-2 border border-hairline">
         sample: {sample != null && sample !== "" ? sample : "all"}
       </span>
       {chunk_size != null && (
-        <span className="px-2 py-0.5 rounded-md bg-slate-900/80 text-slate-300 border border-slate-800">
+        <span className="px-2 py-0.5 rounded-md bg-surface text-ink-2 border border-hairline">
           chunk: {chunk_size}
         </span>
       )}
       {use_cache != null && (
-        <span className="px-2 py-0.5 rounded-md bg-slate-900/80 text-slate-300 border border-slate-800">
+        <span className="px-2 py-0.5 rounded-md bg-surface text-ink-2 border border-hairline">
           {use_cache ? "cache" : "no-cache"}
         </span>
       )}
@@ -1023,27 +1023,27 @@ function RunParams({ params }) {
 
 function ComparePanel({ label, answer, badges = [], timings = [], children }) {
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+    <div className="rounded-xl border border-hairline bg-surface-2 p-4">
       <div className="flex flex-wrap items-center gap-2 mb-2">
-        <span className="text-xs font-semibold text-slate-200">{label}</span>
+        <span className="text-xs font-semibold text-ink">{label}</span>
         {badges.map((badge) => (
           <span
             key={badge}
-            className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-300 border border-amber-800/60"
+            className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200"
           >
             {badge}
           </span>
         ))}
       </div>
-      <p className="text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">{answer}</p>
-      <div className="flex flex-wrap items-center gap-2 mt-3 text-[11px] font-mono text-slate-400">
+      <p className="text-sm text-ink whitespace-pre-wrap leading-relaxed">{answer}</p>
+      <div className="flex flex-wrap items-center gap-2 mt-3 text-[11px] font-mono text-ink-3">
         {timings.map(([tag, value, unit = "ms"]) => (
           value == null ? null : (
             <span
               key={tag}
-              className="flex items-center gap-1 bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-800"
+              className="flex items-center gap-1 bg-surface px-2 py-0.5 rounded-md border border-hairline"
             >
-              {tag === "total" ? <Clock className="h-3 w-3 text-slate-500" /> : <Zap className="h-3 w-3 text-slate-500" />}
+              {tag === "total" ? <Clock className="h-3 w-3 text-ink-4" /> : <Zap className="h-3 w-3 text-ink-4" />}
               {tag} {unit === "ms" ? Math.round(value) : value}{unit}
             </span>
           )
@@ -1057,7 +1057,7 @@ function ComparePanel({ label, answer, badges = [], timings = [], children }) {
 function Field({ label, children }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium text-slate-400">{label}</span>
+      <span className="text-xs font-medium text-ink-3">{label}</span>
       {children}
     </label>
   );
@@ -1065,9 +1065,9 @@ function Field({ label, children }) {
 
 function ProgressBar({ value }) {
   return (
-    <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden mb-3">
+    <div className="h-2 w-full rounded-full bg-surface-2 overflow-hidden mb-3">
       <div
-        className="h-full rounded-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-all duration-300"
+        className="h-full rounded-full bg-gradient-to-r from-accent to-accent-strong transition-all duration-300"
         style={{ width: `${Math.round((value ?? 0) * 100)}%` }}
       />
     </div>
@@ -1078,24 +1078,24 @@ function ResultsTable({ results, partial = false }) {
   return (
     <div className="overflow-x-auto">
       {partial && (
-        <p className="text-xs text-amber-400 font-medium mb-2">
+        <p className="text-xs text-amber-700 font-medium mb-2">
           Partial — scored over the questions answered so far.
         </p>
       )}
       <table className="w-full text-xs">
         <thead>
-          <tr className="text-left text-slate-400 border-b border-slate-800 pb-2">
+          <tr className="text-left text-ink-3 border-b border-hairline pb-2">
             <th className="py-2 pr-4 font-semibold">Test Suite</th>
             <th className="py-2 pr-4 font-semibold">n</th>
             <th className="py-2 pr-4 font-semibold">Metrics</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-800/60 font-mono">
+        <tbody className="divide-y divide-hairline font-mono">
           {results.map((r) => (
-            <tr key={r.name} className="hover:bg-slate-900/40">
-              <td className="py-2 pr-4 font-semibold text-slate-200">{r.name}</td>
-              <td className="py-2 pr-4 text-slate-400">{r.n}</td>
-              <td className="py-2 pr-4 text-slate-300">
+            <tr key={r.name} className="hover:bg-surface-2">
+              <td className="py-2 pr-4 font-semibold text-ink">{r.name}</td>
+              <td className="py-2 pr-4 text-ink-3">{r.n}</td>
+              <td className="py-2 pr-4 text-ink-2">
                 {Object.entries(r)
                   .filter(([k]) => k !== "name" && k !== "n")
                   .map(([k, v]) => `${k}: ${typeof v === "number" ? v.toFixed(2) : v}`)

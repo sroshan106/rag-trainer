@@ -20,11 +20,11 @@ export default function DocumentModal({ fileId, focusIndex = null, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-2xl border border-slate-800 bg-[#111726] p-6 shadow-2xl"
+        className="w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-2xl border border-hairline bg-surface p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-end gap-1 mb-2">
@@ -32,7 +32,7 @@ export default function DocumentModal({ fileId, focusIndex = null, onClose }) {
             to={`/documents/${fileId}${focusIndex !== null ? `?unit=${focusIndex}` : ""}`}
             onClick={onClose}
             title="Open full document"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-lg text-ink-3 hover:text-ink hover:bg-surface-2 transition-colors"
           >
             <Maximize2 className="h-4 w-4" />
           </Link>
@@ -40,7 +40,7 @@ export default function DocumentModal({ fileId, focusIndex = null, onClose }) {
             type="button"
             onClick={onClose}
             title="Close"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-lg text-ink-3 hover:text-ink hover:bg-surface-2 transition-colors"
           >
             <X className="h-4 w-4" />
           </button>

@@ -29,14 +29,14 @@ export default function SourceList({ citations, sources, title = "Sources", comp
   if (entries.length === 0) return null;
 
   const chip =
-    "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-900/60 text-xs max-w-full transition-all";
+    "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-hairline bg-surface-2 text-xs max-w-full transition-all";
 
   return (
-    <div className={compact ? "" : "mt-4 pt-3.5 border-t border-slate-800/80"}>
+    <div className={compact ? "" : "mt-4 pt-3.5 border-t border-hairline"}>
       {!compact && (
         <div className="flex items-center gap-2 mb-2.5">
-          <FileText className="h-3.5 w-3.5 text-slate-400" />
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+          <FileText className="h-3.5 w-3.5 text-ink-3" />
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-ink-3">
             {title} ({entries.length})
           </h3>
         </div>
@@ -45,7 +45,7 @@ export default function SourceList({ citations, sources, title = "Sources", comp
       <div className="flex flex-wrap gap-2">
         {entries.map((entry, i) => {
           const number = (
-            <span className="font-mono text-[10px] text-slate-500 font-semibold">
+            <span className="font-mono text-[10px] text-ink-4 font-semibold">
               [{i + 1}]
             </span>
           );
@@ -58,7 +58,7 @@ export default function SourceList({ citations, sources, title = "Sources", comp
                 target="_blank"
                 rel="noreferrer noopener"
                 title={entry.legacyUrl}
-                className={`${chip} text-blue-400 hover:text-blue-300 hover:bg-slate-800 hover:border-slate-700`}
+                className={`${chip} text-accent hover:text-accent hover:bg-surface-2 hover:border-hairline`}
               >
                 {number}
                 <span className="truncate max-w-xs">{hostnameOf(entry.legacyUrl)}</span>
@@ -76,15 +76,15 @@ export default function SourceList({ citations, sources, title = "Sources", comp
               type="button"
               onClick={() => setOpen(entry)}
               title={[`${entry.filename} — ${entry.label}`, fieldSummary].filter(Boolean).join("\n")}
-              className={`${chip} text-slate-300 hover:text-white hover:bg-slate-800 hover:border-slate-700 cursor-pointer`}
+              className={`${chip} text-ink-2 hover:text-ink hover:bg-surface-2 hover:border-hairline cursor-pointer`}
             >
               {number}
               <span className="truncate max-w-xs">{entry.filename}</span>
-              <span className="shrink-0 font-mono text-[10px] text-blue-400">
+              <span className="shrink-0 font-mono text-[10px] text-accent">
                 {entry.label}
               </span>
               {fieldEntries.length > 0 && (
-                <span className="shrink-0 font-mono text-[10px] text-emerald-400 truncate max-w-[10rem]">
+                <span className="shrink-0 font-mono text-[10px] text-emerald-700 truncate max-w-[10rem]">
                   {fieldSummary}
                 </span>
               )}
