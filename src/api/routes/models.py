@@ -22,10 +22,11 @@ def list_models() -> dict:
     return {
         "catalog": list(model_catalog.CATALOG),
         "installed": model_catalog.list_installed(),
-        # Informational only -- the embed model is pinned (mixing dimensions
-        # in one collection corrupts similarity search), so there is nothing
-        # to select or download here.
+        # The embed model is pinned (mixing dimensions in one collection
+        # corrupts similarity search) -- nothing to *select* here, but it
+        # still needs an explicit download like any other model.
         "active_embed_model": model_catalog.EMBED_MODEL,
+        "embed_installed": model_catalog.embed_installed(),
         "rerank_models": list(model_catalog.RERANK_CATALOG),
         "rerank_installed": model_catalog.rerankers_installed(),
         "active_rerank_model": model_catalog.RERANK_MODEL,
@@ -44,11 +45,12 @@ def start_pull(body: PullModelRequest) -> dict:
         body.model in model_catalog.RERANK_CATALOG
         or body.model == model_catalog.RERANK_MODEL
     )
-    if body.model not in model_catalog.CATALOG and not is_reranker:
+    is_embed = body.model == model_catalog.EMBED_MODEL
+    if body.model not in model_catalog.CATALOG and not is_reranker and not is_embed:
         raise HTTPException(
             status_code=422,
             detail=f"unknown model {body.model!r} -- choose from "
-            f"{[*model_catalog.CATALOG, *model_catalog.RERANK_CATALOG]}",
+            f"{[*model_catalog.CATALOG, *model_catalog.RERANK_CATALOG, model_catalog.EMBED_MODEL]}",
         )
 
     def _run(reporter: ProgressReporter) -> dict | None:

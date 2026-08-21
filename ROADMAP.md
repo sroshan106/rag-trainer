@@ -30,6 +30,7 @@ The following capabilities have been fully implemented and verified in the codeb
 - **Ingest Upload Orchestration:** Move file upload domain logic (streaming hash, deduplication check, parsing validation, provenance recording) out of `src/api/routes/ingest.py` and into `src/ingestion/uploads.py`.
 - **Split `src/rag/history.py`:** Separate table definition, migrations, DAO, and row serialization.
 - **Eliminate Import-Time Side Effects:** Build the LangGraph lazily, move `load_dotenv()` to entrypoints, scope `csv.field_size_limit` inside loaders, and ensure `create_app()` acts as an ASGI factory.
+- **Backend Guard on Embed Model Deletion:** `DELETE /api/models/{model}` currently blocks deleting the active embed model only in the UI (`ModelRow`'s `deletable` flag) -- add the same check server-side in `model_catalog.delete_model` / the route so a direct API call can't corrupt the vectorstore's embedding dimensions.
 
 ---
 

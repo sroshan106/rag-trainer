@@ -170,6 +170,11 @@ def list_installed() -> list[str]:
     return [m for m in CATALOG if _is_installed(m, names)]
 
 
+def embed_installed() -> bool:
+    """Whether EMBED_MODEL is present in the Ollama instance right now."""
+    return _is_installed(EMBED_MODEL, _installed_names())
+
+
 def rerankers_installed() -> list[str]:
     """Reranker models from RERANK_CATALOG actually present in local HuggingFace cache."""
     try:
@@ -195,7 +200,7 @@ def reranker_installed(model: str = RERANK_MODEL) -> bool:
 def pull_ollama_model(model: str, on_progress, should_stop=None) -> None:
     """Stream a model pull from Ollama, reporting progress as it downloads.
     Stopping is cooperative; should_stop is polled between streamed lines."""
-    if model not in _OLLAMA_PULLABLE:
+    if model not in _OLLAMA_PULLABLE and model != EMBED_MODEL:
         raise ValueError(f"{model!r} is not downloadable here: {list(_OLLAMA_PULLABLE)}")
 
     with httpx.stream(

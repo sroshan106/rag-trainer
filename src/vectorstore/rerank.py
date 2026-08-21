@@ -46,6 +46,7 @@ import threading
 from langchain_core.documents import Document
 
 from src.config import env_flag
+from src.observability.logging import log
 
 # English-only and tiny, matching the corpus. Trained on MS MARCO passage
 # ranking -- short query against a paragraph of prose -- which is the shape of
@@ -69,6 +70,19 @@ _init_lock = threading.Lock()
 def rerank_enabled() -> bool:
     """Reorder candidates with the cross-encoder. Set RAG_RERANK=false to compare."""
     return env_flag("RAG_RERANK", default=True)
+
+
+def _is_cached(model: str) -> bool:
+    """Whether ``model`` is already in the local HuggingFace cache."""
+    try:
+        from huggingface_hub import CacheNotFound, scan_cache_dir
+    except ImportError:
+        return False
+    try:
+        cache = scan_cache_dir()
+    except CacheNotFound:
+        return False
+    return any(repo.repo_id == model for repo in cache.repos)
 
 
 def _get_model():
@@ -108,6 +122,12 @@ def rerank(query: str, docs: list[Document], k: int) -> list[Document]:
     """Return the top k documents ranked by the cross-encoder."""
     if not docs:
         return []
+
+    if not _is_cached(RERANK_MODEL):
+        # Reranker isn't downloaded -- don't silently pull it mid-query.
+        # Download it explicitly from Settings > Rerankers instead.
+        log("warning", "reranker not installed, skipping rerank", model=RERANK_MODEL)
+        return docs[:k]
 
     scores = _get_model().predict([(query, doc.page_content) for doc in docs])
     for doc, score in zip(docs, scores):

@@ -215,6 +215,18 @@ export default function Settings() {
         active: (data?.active_rerank_model || data?.rerank_model) === m,
       })),
     },
+    embed: {
+      title: "Vector Embedding Model",
+      subtitle: "Pinned via RAG_EMBED_MODEL -- every stored chunk was embedded with it, so switching isn't offered here. Must be downloaded before ingestion can run.",
+      rows: [
+        {
+          name: data?.active_embed_model || "nomic-embed-text",
+          installed: !!data?.embed_installed,
+          active: true,
+          deletable: false,
+        },
+      ],
+    },
   };
 
   const currentTab = tabConfigs[activeTab];
@@ -260,26 +272,22 @@ export default function Settings() {
         })}
       </div>
 
-      {activeTab === "embed" ? (
-        <EmbedInfoPanel model={data?.active_embed_model || "nomic-embed-text"} info={infoMap[data?.active_embed_model || "nomic-embed-text"]} />
-      ) : (
-        currentTab && (
-          <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
-            <div className="mb-4 pb-3 border-b border-hairline">
-              <h2 className="text-base font-bold text-ink">{currentTab.title}</h2>
-              <p className="text-xs text-ink-3 mt-0.5">{currentTab.subtitle}</p>
-            </div>
-            <ModelTable
-              rows={currentTab.rows}
-              infoMap={infoMap}
-              job={(m) => jobs[m]}
-              onDownload={download}
-              onCancel={cancelDownload}
-              onDeleteRequest={(row, info) => setModelToDelete({ name: row.name, active: row.active, info })}
-              deletingModel={deletingModel}
-            />
+      {currentTab && (
+        <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
+          <div className="mb-4 pb-3 border-b border-hairline">
+            <h2 className="text-base font-bold text-ink">{currentTab.title}</h2>
+            <p className="text-xs text-ink-3 mt-0.5">{currentTab.subtitle}</p>
           </div>
-        )
+          <ModelTable
+            rows={currentTab.rows}
+            infoMap={infoMap}
+            job={(m) => jobs[m]}
+            onDownload={download}
+            onCancel={cancelDownload}
+            onDeleteRequest={(row, info) => setModelToDelete({ name: row.name, active: row.active, info })}
+            deletingModel={deletingModel}
+          />
+        </div>
       )}
 
       {/* Delete Confirmation Warning Modal */}
@@ -355,49 +363,6 @@ export default function Settings() {
               </button>
             </div>
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function EmbedInfoPanel({ model, info }) {
-  return (
-    <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
-      <div className="mb-4 pb-3 border-b border-hairline">
-        <h2 className="text-base font-bold text-ink">Vector Embedding Model</h2>
-        <p className="text-xs text-ink-3 mt-0.5">
-          Set once via <code className="font-mono text-ink-2">RAG_EMBED_MODEL</code> and fixed for the
-          life of the collection -- every stored chunk was embedded with it, so switching models here isn't
-          offered: it would mix incompatible vector dimensions in the same vectorstore and corrupt
-          similarity search. Changing it requires re-ingesting everything.
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-sm font-bold text-ink">{model}</span>
-        {info?.min_vram && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-accent-soft text-accent border border-accent-line">
-            <Zap className="h-3 w-3" />
-            {info.min_vram}
-          </span>
-        )}
-        {info?.disk_size && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono text-ink-3 bg-surface border border-hairline">
-            <HardDrive className="h-3 w-3 text-ink-4" />
-            {info.disk_size}
-          </span>
-        )}
-        {info?.params && (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono text-ink-3 bg-surface border border-hairline">
-            {info.params}
-          </span>
-        )}
-      </div>
-      {(info?.context || info?.description) && (
-        <div className="mt-1 text-xs text-ink-3 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          {info?.context && <span className="font-mono text-ink-2">{info.context}</span>}
-          {info?.context && info?.description && <span className="text-ink-4">•</span>}
-          {info?.description && <span>{info.description}</span>}
         </div>
       )}
     </div>
@@ -498,16 +463,18 @@ function ModelRow({ row, info, job, onDownload, onCancel, onDeleteRequest, delet
               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />
               <span>Installed</span>
             </span>
-            <button
-              type="button"
-              disabled={busy || isDeleting}
-              onClick={() => onDeleteRequest?.(row, info)}
-              title="Delete model from disk"
-              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg text-rose-700 hover:text-rose-700 bg-rose-50 hover:bg-rose-50 border border-rose-200 hover:border-rose-200 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-            >
-              <Trash2 className="h-3.5 w-3.5 text-rose-700" />
-              <span>{isDeleting ? "Deleting..." : "Delete"}</span>
-            </button>
+            {row.deletable !== false && (
+              <button
+                type="button"
+                disabled={busy || isDeleting}
+                onClick={() => onDeleteRequest?.(row, info)}
+                title="Delete model from disk"
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg text-rose-700 hover:text-rose-700 bg-rose-50 hover:bg-rose-50 border border-rose-200 hover:border-rose-200 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+              >
+                <Trash2 className="h-3.5 w-3.5 text-rose-700" />
+                <span>{isDeleting ? "Deleting..." : "Delete"}</span>
+              </button>
+            )}
           </div>
         ) : (
           <div className="flex items-center gap-2">

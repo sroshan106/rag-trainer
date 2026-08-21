@@ -6,6 +6,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
+import httpx
 import sqlalchemy as sa
 
 from langchain_core.documents import Document
@@ -29,6 +30,25 @@ EMBED_RETRIES = int(os.environ.get("RAG_EMBED_RETRIES", "3"))
 
 # Called with (fraction_complete, message) as batches land.
 ProgressHook = Callable[[float, str], None]
+
+
+class EmbedModelNotInstalled(RuntimeError):
+    """EMBED_MODEL isn't pulled into Ollama yet."""
+
+
+def _require_embed_model() -> None:
+    """Fail fast instead of letting every embed request 404 and retry into
+    the same wall. Ingestion should not silently trigger a multi-hundred-MB
+    download -- pull EMBED_MODEL explicitly from Settings > Embeddings."""
+    resp = httpx.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5.0)
+    resp.raise_for_status()
+    names = {m["name"] for m in resp.json().get("models", [])}
+    if EMBED_MODEL in names or any(n.split(":", 1)[0] == EMBED_MODEL for n in names):
+        return
+    raise EmbedModelNotInstalled(
+        f"Embedding model {EMBED_MODEL!r} is not installed. "
+        "Download it from Settings > Embeddings before ingesting."
+    )
 
 
 def _embeddings(num_gpu: int | None = None) -> OllamaEmbeddings:
@@ -86,6 +106,7 @@ def build_vectorstore(
         return ids
 
     batch_size = batch_size or EMBED_BATCH_SIZE
+    _require_embed_model()
     embeddings = _embeddings(num_gpu=999)
     vectorstore = PGVector(
         embeddings=embeddings,
