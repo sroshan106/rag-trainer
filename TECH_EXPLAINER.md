@@ -41,7 +41,7 @@ The engine follows a strict four-layer architecture with unidirectional downward
 
 ## 2. Hardware Budgeting & Constraint Engineering
 
-The system is designed and calibrated for resource-constrained environments (baseline: **4GB VRAM GPU**, e.g., NVIDIA GTX 1050):
+The system is designed and calibrated for a personal workstation rather than a datacenter GPU, so every default assumes a modest, shared VRAM budget:
 
 1. **VRAM Partitioning:**
    - **Generation LLM:** Allocates ~2.0–2.6 GB VRAM for small parameter models (`llama3.2:3b`, `qwen2.5:3b`, `gemma2:2b`).
@@ -257,7 +257,7 @@ Long-running tasks (file ingestion, benchmark suites, model downloads) are manag
 | **Local-Only Inference (Ollama)** | Zero data egress, no per-token billing, complete data privacy. | Lower speed and reasoning ceiling compared to 70B+ cloud LLMs. |
 | **Postgres + pgvector** | Unifies vector embeddings, relational metadata, and full-text search in one ACID engine. | Slightly higher memory footprint than specialized in-memory vector indexes (e.g., Faiss). |
 | **Reciprocal Rank Fusion (RRF)** | Merges dense semantics with exact-keyword lexical recall without score calibration dependencies. | Requires dual retrieval queries per request. |
-| **CPU Cross-Encoder Reranker** | Preserves all 4GB GPU VRAM for the generation LLM. | Adds ~1.0–2.4s CPU latency per query. |
+| **CPU Cross-Encoder Reranker** | Preserves the full GPU VRAM budget for the generation LLM. | Adds ~1.0–2.4s CPU latency per query. |
 | **Deterministic Code Citations** | Eliminates LLM hallucination of citations; guarantees cited units actually existed in context. | Attributed at document/unit level rather than per-sentence. |
 | **Linear Graph (No Retry Loop)** | Deterministic retrieval cannot surface better candidates on identical retry. | Requires future query rewriting module before retry loops make sense. |
 | **Batch Ingest Deduplication** | Reduces Ollama embedding work significantly on datasets with repeated passages. | Requires upfront passage hashing and position mapping. |

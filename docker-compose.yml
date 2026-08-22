@@ -15,7 +15,7 @@ services:
       # this setting (confirmed in its own startup log), so raising it buys
       # embedding nothing. It DOES pre-reserve KV-cache per slot for chat
       # models though -- RAG_NUM_CTX is already tuned to the largest
-      # context that fits this 4GB card at 1 slot, so anything above 1 here
+      # context that fits a personal workstation's GPU at 1 slot, so anything above 1 here
       # risks OOM/CPU-spillover the moment two chat requests overlap (e.g. a
       # Benchmark run with concurrent workers).
       OLLAMA_NUM_PARALLEL: "${OLLAMA_NUM_PARALLEL:-1}"

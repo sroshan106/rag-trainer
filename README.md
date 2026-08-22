@@ -2,7 +2,15 @@
 
 A local, private retrieval-augmented generation pipeline that runs entirely on one machine. Documents (.csv, .json, .jsonl, .txt, .md, .pdf) are parsed, chunked, and embedded into Postgres/pgvector; user queries retrieve the most relevant passages via hybrid dense + lexical search and cross-encoder reranking, and a local Ollama model generates grounded answers with deterministic citations. No data leaves the host.
 
-Built and calibrated against a **4GB GTX 1050**, ensuring every default operates under real VRAM constraints rather than assumed abundance.
+Built and calibrated against a personal workstation, ensuring every default operates under real hardware constraints rather than assumed abundance.
+
+---
+
+## System Requirements
+
+**Recommended:** A workstation-class GPU with 8GB+ VRAM, 16GB system RAM, and an SSD -- runs the full bundled chat model lineup with headroom for concurrent Benchmark workers and a GPU-accelerated reranker.
+
+**Minimum:** 6GB VRAM (or CPU-only, with materially slower generation), 8GB system RAM, and Docker support -- runs the smallest bundled models (`llama3.2:1b`, `gemma2:2b`) with the cross-encoder reranker on CPU.
 
 ---
 

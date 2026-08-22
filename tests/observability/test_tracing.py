@@ -1,6 +1,7 @@
 import pytest
 
 from src.observability import tracing
+from src.observability.logging import LOGGER_NAME
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +37,7 @@ def test_collect_captures_spans_even_when_tracing_disabled():
 
 
 def test_span_records_nothing_when_disabled_and_not_collecting(caplog):
-    with caplog.at_level("INFO", logger=tracing.LOGGER_NAME):
+    with caplog.at_level("INFO", logger=LOGGER_NAME):
         with tracing.span("work"):
             pass
 
@@ -54,6 +55,17 @@ def test_detail_attaches_fields_to_span():
 
 def test_detail_outside_span_is_noop():
     tracing.detail(orphan=True)
+
+
+def test_span_logs_to_ring_buffer_when_tracing_enabled(monkeypatch, caplog):
+    monkeypatch.setenv(tracing.TRACE_ENV, "true")
+
+    with caplog.at_level("INFO", logger=LOGGER_NAME):
+        with tracing.span("work"):
+            tracing.detail(kept=3)
+
+    assert len(caplog.records) == 1
+    assert caplog.records[0].fields == {"span": "work", "duration_ms": pytest.approx(0, abs=1000), "kept": 3}
 
 
 def test_nested_spans_keep_details_separate():

@@ -1,17 +1,12 @@
 import contextvars
 import functools
-import json
-import logging
-import sys
 import time
 from contextlib import contextmanager
 
 from src.config import env_flag
+from src.observability.logging import log
 
 TRACE_ENV = "RAG_TRACE"
-LOGGER_NAME = "rag.trace"
-
-logger = logging.getLogger(LOGGER_NAME)
 
 _details: contextvars.ContextVar = contextvars.ContextVar("span_details", default=None)
 _sinks: contextvars.ContextVar = contextvars.ContextVar("span_sinks", default=())
@@ -19,16 +14,6 @@ _sinks: contextvars.ContextVar = contextvars.ContextVar("span_sinks", default=()
 
 def tracing_enabled() -> bool:
     return env_flag(TRACE_ENV, default=False)
-
-
-def configure_logging(level: int = logging.INFO) -> None:
-    if logger.handlers:
-        return
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(handler)
-    logger.setLevel(level)
-    logger.propagate = False
 
 
 def detail(**fields) -> None:
@@ -40,7 +25,11 @@ def detail(**fields) -> None:
 def _emit(span: dict) -> None:
     for sink in _sinks.get():
         sink.append(span)
-    logger.info(json.dumps(span, default=str))
+    # Ring-buffered (and so visible to GET /api/metrics/logs) only when
+    # tracing is opted into -- the sinks above already give ask() its
+    # per-stage durations unconditionally, this is the verbose field dump.
+    if tracing_enabled():
+        log("info", "trace", **span)
 
 
 @contextmanager

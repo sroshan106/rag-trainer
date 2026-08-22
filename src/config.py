@@ -20,7 +20,6 @@ class Settings:
     rerank_device: str = "cuda"
     rerank_max_length: int = 512
     rerank_enabled: bool = True
-    hybrid_enabled: bool = True
     citations_enabled: bool = True
     history_enabled: bool = True
     tracing_enabled: bool = False
@@ -47,7 +46,6 @@ def get_settings() -> Settings:
         rerank_device=os.environ.get("RAG_RERANK_DEVICE", "cuda"),
         rerank_max_length=int(os.environ.get("RAG_RERANK_MAX_LENGTH", "512")),
         rerank_enabled=env_flag("RAG_RERANK", default=True),
-        hybrid_enabled=env_flag("RAG_HYBRID", default=True),
         citations_enabled=env_flag("RAG_CITATIONS", default=True),
         history_enabled=env_flag("RAG_HISTORY", default=True),
         tracing_enabled=env_flag("RAG_TRACE", default=False),

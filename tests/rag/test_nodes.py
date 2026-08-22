@@ -39,8 +39,8 @@ class FakeLLM:
         return FakeResponse(self.content)
 
 
-def _dense_only(monkeypatch):
-    monkeypatch.setenv("RAG_HYBRID", "false")
+def _no_lexical_hits(monkeypatch):
+    monkeypatch.setattr(retrieve.hybrid.lexical, "search", lambda query, k, connection=None: [])
 
 
 def _no_rerank(monkeypatch):
@@ -80,7 +80,7 @@ def _confidence_doc(dense=None, rerank_score=None):
 
 
 def test_retrieve_node_populates_docs(monkeypatch):
-    _dense_only(monkeypatch)
+    _no_lexical_hits(monkeypatch)
     _no_rerank(monkeypatch)
     doc = Document(page_content="a", metadata={})
     fake_store = FakeVectorstore([(doc, 0.9)])
@@ -94,7 +94,7 @@ def test_retrieve_node_populates_docs(monkeypatch):
 
 
 def test_retrieve_node_stamps_relevance_score(monkeypatch):
-    _dense_only(monkeypatch)
+    _no_lexical_hits(monkeypatch)
     _no_rerank(monkeypatch)
     doc = Document(page_content="a", metadata={})
     monkeypatch.setattr(retrieve, "get_vectorstore", lambda: FakeVectorstore([(doc, 0.73)]))
@@ -304,7 +304,7 @@ def test_grade_node_dense_cutoff_ignores_lexical_hits():
 
 
 def test_retrieve_node_fetches_wide_and_reranks_down(monkeypatch):
-    _dense_only(monkeypatch)
+    _no_lexical_hits(monkeypatch)
     monkeypatch.setenv("RAG_RERANK", "true")
     docs = [Document(page_content=f"d{i}", metadata={}) for i in range(8)]
     fake_store = FakeVectorstore([(d, 0.9 - i * 0.01) for i, d in enumerate(docs)])
@@ -320,7 +320,7 @@ def test_retrieve_node_fetches_wide_and_reranks_down(monkeypatch):
 
 
 def test_rerank_preserves_component_scores(monkeypatch):
-    _dense_only(monkeypatch)
+    _no_lexical_hits(monkeypatch)
     monkeypatch.setenv("RAG_RERANK", "true")
     doc = Document(page_content="a", metadata={})
     monkeypatch.setattr(retrieve, "get_vectorstore", lambda: FakeVectorstore([(doc, 0.73)]))

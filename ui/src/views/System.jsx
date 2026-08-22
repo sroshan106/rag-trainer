@@ -10,9 +10,10 @@ import {
 } from "recharts";
 import { Cpu, Zap, Activity, Database, AlertTriangle } from "lucide-react";
 import Card from "../components/Card.jsx";
-import { metricsStreamUrl } from "../api.js";
+import { metricsStreamUrl, getLogs } from "../api.js";
 
 const HISTORY_LENGTH = 120;
+const LOG_POLL_MS = 4000;
 
 
 const SERIES = [
@@ -42,7 +43,31 @@ export default function SystemView() {
   const [frame, setFrame] = useState(null);
   const [history, setHistory] = useState([]);
   const [connected, setConnected] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [logsError, setLogsError] = useState(null);
   const tRef = useRef(0);
+
+  useEffect(() => {
+    let ignore = false;
+    const poll = () => {
+      getLogs(100)
+        .then((rows) => {
+          if (!ignore) {
+            setLogs(rows);
+            setLogsError(null);
+          }
+        })
+        .catch((err) => {
+          if (!ignore) setLogsError(err.message);
+        });
+    };
+    poll();
+    const interval = setInterval(poll, LOG_POLL_MS);
+    return () => {
+      ignore = true;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     const source = new EventSource(metricsStreamUrl());
@@ -241,6 +266,45 @@ export default function SystemView() {
           )}
         </Card>
       </div>
+
+      <Card
+        title="Query Trace Log"
+        subtitle="Per-stage retrieval/rerank/generation detail. Set RAG_TRACE=true to populate."
+      >
+        {logsError ? (
+          <div className="text-xs text-rose-700">Logs unavailable: {logsError}</div>
+        ) : logs.length === 0 ? (
+          <div className="text-xs text-ink-4">No trace activity yet.</div>
+        ) : (
+          <div className="flex flex-col gap-1 max-h-96 overflow-y-auto font-mono text-[11px]">
+            {logs.slice().reverse().map((entry, idx) => (
+              <LogLine key={idx} entry={entry} />
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function LogLine({ entry }) {
+  const { ts, level, logger, message, span, duration_ms, ...fields } = entry;
+  const time = ts ? new Date(ts * 1000).toLocaleTimeString() : "--";
+  const heading = span ?? message ?? "log";
+  const extra = Object.entries(fields)
+    .filter(([, v]) => v !== null && v !== undefined)
+    .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`)
+    .join(" ");
+
+  return (
+    <div className="flex items-start gap-2 border-b border-hairline/50 py-1 last:border-0">
+      <span className="text-ink-4 shrink-0">{time}</span>
+      <span className={`shrink-0 ${level === "WARNING" ? "text-amber-700" : level === "ERROR" ? "text-rose-700" : "text-ink-3"}`}>
+        {level ?? "INFO"}
+      </span>
+      <span className="text-ink font-semibold shrink-0">{heading}</span>
+      {duration_ms != null && <span className="text-ink-3 shrink-0">{duration_ms}ms</span>}
+      {extra && <span className="text-ink-3 truncate">{extra}</span>}
     </div>
   );
 }

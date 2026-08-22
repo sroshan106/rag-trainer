@@ -190,8 +190,6 @@ def ask_stream(query: str, model: str | None = None):
 
 
 def main() -> int:
-    if tracing.tracing_enabled():
-        tracing.configure_logging()
     query = " ".join(sys.argv[1:]) or "What is this document collection about?"
 
     from src.rag.model_catalog import list_installed

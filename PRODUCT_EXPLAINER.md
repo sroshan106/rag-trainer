@@ -11,7 +11,7 @@ A complete guide to the product vision, user workflows, feature capabilities, an
 ### Core Value Propositions
 1. **Total Data Privacy:** All processing—document parsing, chunk vectorization, database storage, cross-encoder reranking, and LLM text generation—happens on the local host. No proprietary documents or queries ever touch an external cloud or third-party API.
 2. **Grounded, Verifiable Answers:** Answers are strictly synthesized from retrieved document chunks. The system deterministically computes document citations and lets users verify claims by inspecting the exact row, line, or page in the source document.
-3. **Calibrated for Commodity Hardware:** Engineered from the ground up to operate reliably on entry-level GPUs (baseline: 4GB VRAM) without out-of-memory crashes or silent performance degradation.
+3. **Calibrated for Personal Hardware:** Engineered from the ground up to operate reliably on a personal workstation without out-of-memory crashes or silent performance degradation.
 4. **Comprehensive Evaluation & Observability:** Built-in benchmark harness with live suite execution, custom test dataset management, side-by-side retrieval comparison ("Impact Check"), and real-time hardware telemetry.
 
 ---

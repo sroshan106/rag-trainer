@@ -96,20 +96,17 @@ flowchart TD
 
     HIST --> RETRIEVE["<b>retrieve_node</b>"]
 
-    subgraph R["retrieve — src/rag/nodes.py"]
+    subgraph R["retrieve — src/rag/retrieve.py"]
         direction TB
-        HYB{"RAG_HYBRID<br/>enabled?"}
         DENSE["Dense k-NN (pgvector)<br/>FETCH_K = 20"]
         LEX["Lexical Search<br/>tsvector + GIN, ts_rank_cd"]
         RRF["Reciprocal Rank Fusion<br/>RRF_K = 60 (src/vectorstore/hybrid.py)"]
         RER{"RAG_RERANK<br/>enabled?"}
         CE["Cross-Encoder Rerank (CPU)<br/>ms-marco-MiniLM-L-6-v2<br/>Squashed Logits -> [0, 1]"]
         TOPK["Truncate to RETRIEVE_K = 5"]
-        HYB -->|Yes| DENSE --> RRF
-        HYB -->|Yes| LEX --> RRF
-        HYB -->|No| DENSE
+        DENSE --> RRF
+        LEX --> RRF
         RRF --> RER
-        DENSE --> RER
         RER -->|Yes| CE --> TOPK
         RER -->|No| TOPK
     end

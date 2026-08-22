@@ -119,6 +119,7 @@ export const pullModel = (model) => postJson("/models/pull", { model });
 export const pullHistory = () => request("/models/pull/history");
 export const deleteModel = (model) => del(`/models/${encodeURIComponent(model)}`);
 export const getMetrics = () => request("/metrics");
+export const getLogs = (limit = 100) => request(`/metrics/logs?limit=${limit}`);
 
 const TERMINAL_STATUSES = ["done", "failed", "cancelled"];
 
