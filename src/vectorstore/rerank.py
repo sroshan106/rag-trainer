@@ -45,20 +45,20 @@ import threading
 
 from langchain_core.documents import Document
 
-from src.config import env_flag
+from src.config import env_flag, get_settings
 from src.observability.logging import log
+
+_settings = get_settings()
 
 # English-only and tiny, matching the corpus. Trained on MS MARCO passage
 # ranking -- short query against a paragraph of prose -- which is the shape of
 # every query this pipeline serves.
-RERANK_MODEL = os.environ.get(
-    "RAG_RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
-)
+RERANK_MODEL = _settings.rerank_model
 
 RERANK_SCORE_KEY = "rerank_score"
 
-DEVICE = os.environ.get("RAG_RERANK_DEVICE", "cpu")
-MAX_LENGTH = int(os.environ.get("RAG_RERANK_MAX_LENGTH", "512"))
+DEVICE = _settings.rerank_device
+MAX_LENGTH = _settings.rerank_max_length
 
 _model = None
 # The benchmark runner drives the graph from a thread pool, so the lazy
@@ -72,17 +72,19 @@ def rerank_enabled() -> bool:
     return env_flag("RAG_RERANK", default=True)
 
 
-def _is_cached(model: str) -> bool:
-    """Whether ``model`` is already in the local HuggingFace cache."""
+def hf_cached_repos() -> set[str]:
+    """Repo ids present in the local HuggingFace cache. Empty when unavailable."""
     try:
         from huggingface_hub import CacheNotFound, scan_cache_dir
     except ImportError:
-        return False
+        return set()
     try:
-        cache = scan_cache_dir()
+        return {repo.repo_id for repo in scan_cache_dir().repos}
     except CacheNotFound:
-        return False
-    return any(repo.repo_id == model for repo in cache.repos)
+        return set()
+    except Exception as exc:  # noqa: BLE001 - a status check must not 500 the page
+        log("warning", "huggingface cache probe failed", error=repr(exc))
+        return set()
 
 
 def _get_model():
@@ -123,7 +125,7 @@ def rerank(query: str, docs: list[Document], k: int) -> list[Document]:
     if not docs:
         return []
 
-    if not _is_cached(RERANK_MODEL):
+    if RERANK_MODEL not in hf_cached_repos():
         # Reranker isn't downloaded -- don't silently pull it mid-query.
         # Download it explicitly from Settings > Rerankers instead.
         log("warning", "reranker not installed, skipping rerank", model=RERANK_MODEL)

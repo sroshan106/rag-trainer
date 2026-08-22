@@ -44,8 +44,8 @@ The engine follows a strict four-layer architecture with unidirectional downward
 The system is designed and calibrated for resource-constrained environments (baseline: **4GB VRAM GPU**, e.g., NVIDIA GTX 1050):
 
 1. **VRAM Partitioning:**
-   - **Generation LLM:** Allocates ~2.0–2.6 GB VRAM for small parameter models (`llama3.2:3b`, `qwen3:4b`, `gemma2:2b`).
-   - **Context Window Limits:** Standard context is configured via `RAG_NUM_CTX=8192`. For `qwen3:4b`, `RAG_NUM_CTX_QWEN3=3072` is enforced to prevent KV-cache spilling into system RAM / CPU execution (which causes 400s+ inference stalls).
+   - **Generation LLM:** Allocates ~2.0–2.6 GB VRAM for small parameter models (`llama3.2:3b`, `qwen2.5:3b`, `gemma2:2b`).
+   - **Context Window Limits:** Context is configured via `RAG_NUM_CTX=8192` to prevent KV-cache spilling into system RAM / CPU execution (which causes 400s+ inference stalls).
    - **Ollama Slot Limits:** `OLLAMA_NUM_PARALLEL=1` prevents multi-slot VRAM pre-allocation crashes.
 2. **CPU Offloading for Cross-Encoder Reranking:**
    - `cross-encoder/ms-marco-MiniLM-L-6-v2` runs on **CPU** by default (`RAG_RERANK_DEVICE=cpu`).
@@ -126,14 +126,10 @@ Retrieved chunks undergo dual cutoff filtering:
 - **Lexical Hits Invariant:** Lexical exact-match hits bypass the dense score cutoff.
 - **Empty Survival:** If no chunks survive grading, execution immediately routes to `_refusal()`, returning `REFUSAL_ANSWER` (*"I don't have enough context to answer that question."*) without LLM invocation.
 
-### 3.3. Grounded Generation & Thinking Suppression (`src/rag/prompts.py`, `src/rag/nodes.py`)
+### 3.3. Grounded Generation (`src/rag/prompts.py`, `src/rag/nodes.py`)
 
 - **Prompt Construction:** Graded chunk texts are concatenated separated by double newlines (`format_context`). Headers/file paths are omitted from prompt text to prevent prompt pollution and token waste.
 - **Prompt Instruction:** Explicitly instructs plain prose without hallucinated inline source tags.
-- **Thinking Model Support (`qwen3`):**
-  - Prompt text receives ` /no_think` suffix.
-  - Streaming uses `_ThinkFilter` to drop `<think>...</think>` tokens incrementally.
-  - Non-streaming uses `_strip_thinking()` regex cleanup.
 - **Confidence Metric:**
   - `confidence_of(docs)` takes top-1 squashed cross-encoder score (or top-1 dense cosine similarity if reranking is disabled).
 

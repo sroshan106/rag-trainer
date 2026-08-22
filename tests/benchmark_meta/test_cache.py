@@ -55,10 +55,9 @@ def test_eval_uses_the_cache_it_is_given(tmp_path, monkeypatch):
     monkeypatch.setattr(
         run_benchmark, "_run", lambda q, model=None: {"answer": "x", "retrieved_indices": ["7"]}
     )
+    suite = run_benchmark.build_suite(test_csv, sample=2)
     with ResultCache(tmp_path / "c.jsonl") as cache:
-        run_benchmark.eval_answerable(
-            test_csv, workers=2, cache=cache, sample=2
-        )
+        run_benchmark._run_suite(suite.name, suite.rows, 2, cache, None)
         assert len(cache) == 2
 
 

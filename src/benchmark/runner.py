@@ -15,8 +15,18 @@ from pathlib import Path
 from typing import Callable
 
 from src.benchmark.cache import CACHE_DIR, ResultCache, config_fingerprint
+from src.benchmark.files import (
+    ANSWER_COLUMNS,
+    DOC_INDEX_COLUMNS,
+    QUESTION_COLUMNS,
+    get_test_file_entry,
+    get_uploaded_test_files,
+    resolve_test_file_path,
+)
 from src.rag.graph import graph
-from src.rag.nodes import AVAILABLE_MODELS, RETRIEVE_K
+from src.rag.model_policy import resolve_model
+from src.rag.models import AVAILABLE_MODELS
+from src.rag.retrieve import RETRIEVE_K
 
 CHUNK_SIZE = 10
 DEFAULT_WORKERS = 4
@@ -53,6 +63,18 @@ def _answer_overlap(expected: str, actual: str) -> float:
     return len(exp_kw & act_kw) / len(exp_kw)
 
 
+def _by_alias(row: dict, aliases: tuple[str, ...], allow_empty: bool = False) -> str | None:
+    """First alias present in ``row``, stripped. ``allow_empty`` keeps blanks."""
+    for key in aliases:
+        value = row.get(key)
+        if value is None:
+            continue
+        value = str(value).strip()
+        if value or allow_empty:
+            return value
+    return None
+
+
 def _normalize_csv_row(row: dict, mapping: dict | None = None) -> dict | None:
     """Extract standard question, answer, and document_index from a CSV row."""
     question = None
@@ -73,25 +95,16 @@ def _normalize_csv_row(row: dict, mapping: dict | None = None) -> dict | None:
     clean_row = {k.strip().lower(): v for k, v in row.items() if k is not None}
 
     if not question:
-        for key in ("question", "query", "prompt", "q", "question_text"):
-            if key in clean_row and clean_row[key] and clean_row[key].strip():
-                question = clean_row[key].strip()
-                break
+        question = _by_alias(clean_row, QUESTION_COLUMNS)
 
     if not question:
         return None
 
     if answer is None:
-        for key in ("answer", "ground_truth", "reference", "expected", "target", "a", "expected_answer"):
-            if key in clean_row and clean_row[key] is not None:
-                answer = clean_row[key].strip()
-                break
+        answer = _by_alias(clean_row, ANSWER_COLUMNS, allow_empty=True)
 
     if doc_index is None:
-        for key in ("document_index", "doc_index", "doc_id", "index", "document_id"):
-            if key in clean_row and clean_row[key] is not None and clean_row[key].strip() != "":
-                doc_index = clean_row[key].strip()
-                break
+        doc_index = _by_alias(clean_row, DOC_INDEX_COLUMNS)
 
     res = {"question": question}
     if answer is not None:
@@ -102,18 +115,11 @@ def _normalize_csv_row(row: dict, mapping: dict | None = None) -> dict | None:
 
 
 def _resolve_csv_path(path_or_name: str | Path) -> Path:
-    p = Path(path_or_name)
-    if p.is_file():
-        return p
-    upload_p = Path("data/benchmark_uploads") / p
-    if upload_p.is_file():
-        return upload_p
+    """A usable path for a suite named by path, upload id, or filename."""
     try:
-        from src.benchmark.files import resolve_test_file_path
         return resolve_test_file_path(str(path_or_name))
-    except Exception:
-        pass
-    return p
+    except FileNotFoundError:
+        return Path(path_or_name)
 
 
 def _load_csv(
@@ -121,17 +127,13 @@ def _load_csv(
 ) -> list[dict]:
     resolved = _resolve_csv_path(name)
     if mapping is None:
-        try:
-            from src.benchmark.files import get_test_file_entry
-            entry = get_test_file_entry(str(name)) or get_test_file_entry(str(resolved))
-            if entry:
-                mapping = {
-                    "question_col": entry.get("question_col"),
-                    "answer_col": entry.get("answer_col"),
-                    "doc_index_col": entry.get("doc_index_col"),
-                }
-        except Exception:
-            pass
+        entry = get_test_file_entry(str(name)) or get_test_file_entry(str(resolved))
+        if entry:
+            mapping = {
+                "question_col": entry.get("question_col"),
+                "answer_col": entry.get("answer_col"),
+                "doc_index_col": entry.get("doc_index_col"),
+            }
 
     with open(resolved, newline="", encoding="utf-8") as f:
         raw_rows = list(csv.DictReader(f))
@@ -159,10 +161,6 @@ def _run(query: str, model: str) -> dict:
     }
 
 
-def _dummy_cache() -> ResultCache:
-    return ResultCache(CACHE_DIR / "unused.jsonl", enabled=False)
-
-
 def _run_suite(
     name: str,
     rows: list[dict],
@@ -177,8 +175,7 @@ def _run_suite(
         hit = cache.get(name, question)
         if hit is not None:
             return hit
-        current_run = sys.modules[__name__]._run
-        result = current_run(question, model)
+        result = _run(question, model)
         cache.put(name, question, result)
         return result
 
@@ -240,41 +237,6 @@ def score_no_answer(name: str, rows: list[dict], results: list[dict]) -> dict:
     }
 
 
-def eval_answerable(
-    name: str | Path,
-    workers: int = DEFAULT_WORKERS,
-    cache: ResultCache | None = None,
-    sample: int | None = None,
-    overlap_threshold: float = 0.3,
-    model: str | None = None,
-) -> dict:
-    rows = _load_csv(name, sample)
-    suite_name = Path(name).name
-    if not rows:
-        return {"name": suite_name, "n": 0}
-    results = _run_suite(
-        suite_name, rows, workers, _dummy_cache() if cache is None else cache, model
-    )
-    return score_answerable(suite_name, rows, results, overlap_threshold)
-
-
-def eval_no_answer(
-    name: str | Path,
-    workers: int = DEFAULT_WORKERS,
-    cache: ResultCache | None = None,
-    sample: int | None = None,
-    model: str | None = None,
-) -> dict:
-    rows = _load_csv(name, sample)
-    suite_name = Path(name).name
-    if not rows:
-        return {"name": suite_name, "n": 0}
-    results = _run_suite(
-        suite_name, rows, workers, _dummy_cache() if cache is None else cache, model
-    )
-    return score_no_answer(suite_name, rows, results)
-
-
 class _Suite:
     def __init__(self, name: str, scorer: Callable[[str, list, list], dict], rows: list[dict]):
         self.name = name
@@ -311,16 +273,12 @@ def run_all(
     should_stop: Callable[[], bool] | None = None,
     test_files: list[str | Path] | None = None,
 ) -> list[dict]:
-    if model not in AVAILABLE_MODELS:
-        raise ValueError(
-            f"model is required -- choose from {list(AVAILABLE_MODELS)}"
-        )
+    resolve_model(model)
 
     if test_files:
         suites = [build_suite(f, sample=sample) for f in test_files]
     else:
-        from src.benchmark.files import list_test_files
-        available = list_test_files()
+        available = get_uploaded_test_files()
         suites = [
             build_suite(s.get("stored_path") or s["id"], sample=sample, name=s.get("name"))
             for s in available

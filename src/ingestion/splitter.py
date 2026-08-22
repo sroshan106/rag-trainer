@@ -1,4 +1,4 @@
-"""Phase 3: chunk documents for embedding."""
+"""Chunk documents for embedding."""
 
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter, TokenTextSplitter

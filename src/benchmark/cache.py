@@ -17,7 +17,7 @@ import json
 import threading
 from pathlib import Path
 
-from src.rag import nodes
+from src.rag import grade, retrieve
 from src.vectorstore import rerank
 from src.vectorstore.store import EMBED_MODEL
 
@@ -30,12 +30,12 @@ def config_fingerprint(model: str) -> str:
         {
             "model": model,
             "embed_model": EMBED_MODEL,
-            "k": nodes.RETRIEVE_K,
-            "fetch_k": nodes.FETCH_K,
+            "k": retrieve.RETRIEVE_K,
+            "fetch_k": retrieve.FETCH_K,
             "rerank": rerank.rerank_enabled(),
             "rerank_model": rerank.RERANK_MODEL,
-            "floor": nodes.RELEVANCE_FLOOR,
-            "ratio": nodes.RELEVANCE_RATIO,
+            "floor": grade.RELEVANCE_FLOOR,
+            "ratio": grade.RELEVANCE_RATIO,
         },
         sort_keys=True,
     )

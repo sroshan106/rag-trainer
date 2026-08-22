@@ -14,7 +14,7 @@ services:
       # This Ollama build caps embedding models to n_slots=1 regardless of
       # this setting (confirmed in its own startup log), so raising it buys
       # embedding nothing. It DOES pre-reserve KV-cache per slot for chat
-      # models though -- RAG_NUM_CTX_QWEN3 is already tuned to the largest
+      # models though -- RAG_NUM_CTX is already tuned to the largest
       # context that fits this 4GB card at 1 slot, so anything above 1 here
       # risks OOM/CPU-spillover the moment two chat requests overlap (e.g. a
       # Benchmark run with concurrent workers).
@@ -70,7 +70,6 @@ services:
       RAG_RERANK: "${RAG_RERANK:-true}"
       RAG_FETCH_K: "${RAG_FETCH_K:-20}"
       RAG_NUM_CTX: "${RAG_NUM_CTX:-8192}"
-      RAG_NUM_CTX_QWEN3: "${RAG_NUM_CTX_QWEN3:-3072}"
       RAG_EMBED_BATCH: "${RAG_EMBED_BATCH:-1024}"
       # The embedding model runs with n_slots=1 on this Ollama build --
       # concurrent workers just queue behind the one slot and add scheduling

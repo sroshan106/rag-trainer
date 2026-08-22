@@ -1,11 +1,8 @@
 """FastAPI instance for the RAG dashboard.
 
-Binds to 127.0.0.1 by default (ui_plan.md open decision 1: no auth,
-single user) -- see ``run`` below, which is what ``uvicorn src.api.app:app``
-or ``python -m src.api.app`` both end up using.
+Binds to 127.0.0.1 by default: no auth, single user, local tool. Served by
+``uvicorn src.api.app:app`` or ``python -m src.api.app``.
 """
-
-import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,10 +17,13 @@ from src.api.routes import (
     models,
     query,
 )
+from src.config import get_settings
 from src.observability.logging import configure_logging
 
-HOST = os.environ.get("RAG_API_HOST", "127.0.0.1")
-PORT = int(os.environ.get("RAG_API_PORT", "8000"))
+_settings = get_settings()
+
+HOST = _settings.api_host
+PORT = _settings.api_port
 
 # The Vite dev server runs on a different origin during development; the
 # production build is served same-origin (see ui/README) and needs no CORS

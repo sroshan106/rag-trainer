@@ -6,9 +6,6 @@ from src.api.app import app
 
 client = TestClient(app)
 
-# No default model exists anymore -- every request below must name one
-# explicitly. Matches what src.rag.model_catalog.list_installed() actually
-# reports against the live Ollama instance these tests run against.
 TEST_MODEL = "llama3.2:3b"
 
 
@@ -52,12 +49,12 @@ def test_query_passes_the_chosen_model_through(monkeypatch):
         return {"answer": "a", "citations": [], "refused": False, "confidence": 0.0}
 
     monkeypatch.setattr("src.api.routes.query.ask", fake_ask)
-    monkeypatch.setattr("src.api.routes.query.list_installed", lambda: ["qwen3:4b"])
+    monkeypatch.setattr("src.api.routes.query.list_installed", lambda: ["qwen2.5:3b"])
 
-    resp = client.post("/api/query", json={"query": "q", "model": "qwen3:4b"})
+    resp = client.post("/api/query", json={"query": "q", "model": "qwen2.5:3b"})
 
     assert resp.status_code == 200
-    assert seen["model"] == "qwen3:4b"
+    assert seen["model"] == "qwen2.5:3b"
 
 
 def test_query_rejects_an_unknown_model():
@@ -67,7 +64,6 @@ def test_query_rejects_an_unknown_model():
 
 
 def test_query_rejects_when_no_model_given():
-    # No fallback -- a query without a model is a 422, not a silent default.
     resp = client.post("/api/query", json={"query": "q"})
 
     assert resp.status_code == 422
@@ -115,12 +111,6 @@ def test_query_failure_surfaces_as_502(monkeypatch):
 
 
 def _sse_events(text):
-    """Pull the JSON payloads out of an SSE body.
-
-    The whole body arrives at once here -- TestClient runs the endpoint to
-    completion -- so the events can be parsed after the fact rather than
-    incrementally.
-    """
     return [
         json.loads(line[len("data:"):].strip())
         for line in text.splitlines()
@@ -172,11 +162,11 @@ def test_stream_passes_the_chosen_model_through(monkeypatch):
         yield {"type": "done", "answer": "a", "citations": [], "refused": False}
 
     monkeypatch.setattr("src.api.routes.query.ask_stream", fake_ask_stream)
-    monkeypatch.setattr("src.api.routes.query.list_installed", lambda: ["qwen3:4b"])
+    monkeypatch.setattr("src.api.routes.query.list_installed", lambda: ["qwen2.5:3b"])
 
-    client.post("/api/query/stream", json={"query": "q", "model": "qwen3:4b"})
+    client.post("/api/query/stream", json={"query": "q", "model": "qwen2.5:3b"})
 
-    assert seen["model"] == "qwen3:4b"
+    assert seen["model"] == "qwen2.5:3b"
 
 
 def test_stream_rejects_an_unknown_model():

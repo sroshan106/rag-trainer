@@ -16,9 +16,8 @@ Answer:"""
 def format_context(docs: list) -> str:
     """Join the graded chunks into the prompt's context block.
 
-    Chunks are separated but not labelled. A provenance header used to precede
-    each one, which cost prompt budget on every query and invited the model to
-    quote a filename back at the reader despite the instruction above -- the
-    citations are assembled from metadata and shown beside the answer instead.
+    Chunks are separated but deliberately not labelled: citations are assembled
+    from metadata and shown beside the answer, so a provenance header here would
+    only spend prompt budget and invite the model to name sources inline.
     """
     return "\n\n".join(doc.page_content for doc in docs)

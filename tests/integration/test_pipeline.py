@@ -17,7 +17,8 @@ if not os.environ.get("RAG_INTEGRATION"):
 
 from src.observability import tracing  # noqa: E402
 from src.rag.graph import ask, graph  # noqa: E402
-from src.rag.nodes import AVAILABLE_MODELS, RELEVANCE_FLOOR, SCORE_KEY  # noqa: E402
+from src.rag.grade import RELEVANCE_FLOOR, SCORE_KEY  # noqa: E402
+from src.rag.models import AVAILABLE_MODELS  # noqa: E402
 
 # No default model exists anymore -- these tests exercise the pipeline
 # end-to-end and must name one explicitly, same as any real caller would.

@@ -43,8 +43,8 @@ query_history = sa.Table(
     sa.Column("citations", JSONB, nullable=True),
     sa.Column("refused", sa.Boolean, nullable=True),
     # How well the best retrieved chunk matched, 0-1. Recorded but not yet
-    # acted on -- see nodes.confidence_of on why a threshold needs sweeping
-    # before it can gate anything.
+    # acted on -- see generate.confidence_of; a threshold needs sweeping before
+    # it can gate anything.
     sa.Column("confidence", sa.Float, nullable=True),
     sa.Column("latency_ms", sa.Float, nullable=True),
     # Breakout of latency_ms: how much of the total went to the cross-encoder

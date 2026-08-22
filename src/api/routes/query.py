@@ -8,6 +8,7 @@ import threading
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
+from src.api.deps import validated_model
 from src.api.schemas import CollectionStatus, QueryRequest, QueryResponse
 from src.rag.graph import ask, ask_stream
 from src.rag.model_catalog import list_installed
@@ -27,7 +28,7 @@ def list_models() -> dict:
 
 @router.post("", response_model=QueryResponse)
 def run_query(body: QueryRequest) -> dict:
-    model = _validated_model(body.model)
+    model = validated_model(body.model)
     try:
         return ask(body.query, model=model)
     except Exception as exc:  # noqa: BLE001 - surfaced to the client as a 502
@@ -44,21 +45,6 @@ def collection_status() -> dict:
     """
     chunks = count_chunks()
     return {"chunks": chunks, "empty": chunks == 0}
-
-
-def _validated_model(model: str | None) -> str:
-    installed = list_installed()
-    if model not in installed:
-        if not installed:
-            raise HTTPException(
-                status_code=422,
-                detail="no chat model downloaded -- download one in Settings first",
-            )
-        raise HTTPException(
-            status_code=422,
-            detail=f"unknown model {model!r} -- choose from {installed}",
-        )
-    return model
 
 
 async def event_generator(request: Request, body: QueryRequest):
@@ -114,8 +100,8 @@ async def event_generator(request: Request, body: QueryRequest):
 
 @router.post("/stream")
 async def stream_query(request: Request, body: QueryRequest) -> EventSourceResponse:
-    # ``_validated_model`` asks Ollama over blocking HTTP (5s timeout). This
+    # ``validated_model`` asks Ollama over blocking HTTP (5s timeout). This
     # path operation is async, so calling it inline would stall the event loop
     # -- and every other request with it -- on each stream request.
-    await asyncio.to_thread(_validated_model, body.model)
+    await asyncio.to_thread(validated_model, body.model)
     return EventSourceResponse(event_generator(request, body))

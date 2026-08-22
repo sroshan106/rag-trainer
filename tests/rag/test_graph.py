@@ -12,15 +12,12 @@ def test_build_graph_compiles():
 
 
 def test_graph_has_no_retry_edge_back_into_retrieve():
-    # Retrieval is deterministic and rank-ordered, so a retry edge could
-    # never change the grader's verdict. Guard against it creeping back.
     edges = build_graph().get_graph().edges
 
     assert not [e for e in edges if e.source == "grade" and e.target == "retrieve"]
 
 
 class FakeHistory:
-    """Records what ask_stream wrote, without touching a database."""
 
     def __init__(self):
         self.completed = None
@@ -47,7 +44,6 @@ def _doc(text, source="a.txt"):
 
 @pytest.fixture
 def streaming(monkeypatch):
-    """Stub every node the streaming path steps through, plus history."""
     fake_history = FakeHistory()
     monkeypatch.setattr(graph_module, "history", fake_history)
     monkeypatch.setattr(
@@ -130,8 +126,6 @@ def test_ask_stream_records_the_completed_answer(streaming):
 
 
 def test_ask_stream_raises_for_an_unrecognized_model(streaming):
-    # No fallback: an unknown model is a caller error, not silently swapped
-    # for whatever the default used to be.
     with pytest.raises(ValueError, match="model is required"):
         list(graph_module.ask_stream("q", model="gpt-4"))
 
@@ -142,14 +136,13 @@ def test_ask_stream_raises_when_no_model_given(streaming):
 
 
 def test_ask_stream_passes_a_known_model_through(streaming):
-    done = list(graph_module.ask_stream("q", model="qwen3:4b"))[-1]
+    done = list(graph_module.ask_stream("q", model="qwen2.5:3b"))[-1]
 
-    assert done["model"] == "qwen3:4b"
+    assert done["model"] == "qwen2.5:3b"
 
 
 @pytest.fixture
 def direct(monkeypatch):
-    """Stub direct_answer; ask_direct must never touch history or the graph."""
     monkeypatch.setattr(
         graph_module,
         "direct_answer",
@@ -202,11 +195,6 @@ def test_ask_stream_reports_the_refusal_the_generator_declared(monkeypatch, stre
 def test_an_answer_with_no_citable_chunks_is_not_reported_as_a_refusal(
     monkeypatch, streaming
 ):
-    """Chunks ingested before provenance existed ground an answer uncitably.
-
-    The old rule read refusal off an empty citation list, which turned every
-    such answer into a refusal in the UI and in the history table.
-    """
     def uncitable_stream(state):
         yield "the answer"
         return {

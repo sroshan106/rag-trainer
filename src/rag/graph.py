@@ -1,4 +1,4 @@
-"""Phase 5: state schema, graph wiring, entrypoint."""
+"""RAG state schema, graph wiring, and the ask/stream/compare entrypoints."""
 
 import sys
 import time
@@ -10,23 +10,10 @@ from typing_extensions import TypedDict
 from src.observability import tracing
 from src.rag import history
 from src.rag.citations import format_citations
-from src.rag.nodes import (
-    AVAILABLE_MODELS,
-    direct_answer,
-    generate_node,
-    generate_stream,
-    grade_node,
-    retrieve_node,
-)
-
-
-def _resolve_model(model: str | None) -> str:
-    """Caller must name a model in AVAILABLE_MODELS."""
-    if model not in AVAILABLE_MODELS:
-        raise ValueError(
-            f"model is required -- choose one of {list(AVAILABLE_MODELS)}"
-        )
-    return model
+from src.rag.generate import direct_answer, generate_node, generate_stream
+from src.rag.grade import grade_node
+from src.rag.model_policy import resolve_model
+from src.rag.retrieve import retrieve_node
 
 
 class RAGState(TypedDict):
@@ -82,7 +69,7 @@ def ask(query: str, model: str | None = None) -> dict:
 
     Model is required. Exchange is written to query history table.
     """
-    resolved_model = _resolve_model(model)
+    resolved_model = resolve_model(model)
     entry_id = history.start(query=query, model=resolved_model)
     try:
         result, durations, latency_ms = _run_graph(query, resolved_model)
@@ -119,7 +106,7 @@ def ask_compare(query: str, model: str | None = None) -> dict:
     Benchmark view's side-by-side comparison, which must not pollute Ask's
     history with ad-hoc test queries.
     """
-    resolved_model = _resolve_model(model)
+    resolved_model = resolve_model(model)
     result, durations, latency_ms = _run_graph(query, resolved_model)
     return {
         "answer": result["answer"],
@@ -140,7 +127,7 @@ def ask_direct(query: str, model: str | None = None) -> dict:
     the only difference is that this path never touches the vectorstore. The
     gap between the two answers is what embedding/retrieval contributed.
     """
-    resolved_model = _resolve_model(model)
+    resolved_model = resolve_model(model)
     started = time.perf_counter()
     result = direct_answer(resolved_model, query)
     latency_ms = round((time.perf_counter() - started) * 1000, 1)
@@ -159,7 +146,7 @@ def ask_stream(query: str, model: str | None = None):
     Yields stages (retrieve, grade, generate), tokens, and done/error events.
     Closing this generator early stops generation and cancels the run.
     """
-    resolved_model = _resolve_model(model)
+    resolved_model = resolve_model(model)
     started = time.perf_counter()
     entry_id = history.start(query=query, model=resolved_model)
     parts: list[str] = []

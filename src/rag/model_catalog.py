@@ -1,21 +1,14 @@
-"""Which models this app can use, and what's actually on disk right now.
-
-Model presence checking and download management for chat, embedding, and reranker models. Chat/embed via Ollama, reranker via HuggingFace Hub.
-"""
-
 import json
-import os
 
 import httpx
 
-from src.observability.logging import log
-from src.rag.nodes import AVAILABLE_MODELS
+from src.config import get_settings
+from src.rag.models import AVAILABLE_MODELS
 from src.vectorstore import rerank
-from src.vectorstore.store import EMBED_MODEL
+from src.vectorstore.store import EMBED_MODEL, model_is_installed, ollama_model_names
 
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_BASE_URL = get_settings().ollama_base_url
 
-# Chat models the UI is allowed to offer as choices for download and selection.
 CATALOG = AVAILABLE_MODELS
 
 
@@ -35,9 +28,7 @@ _DEFAULT_RERANK_MODELS = (
 )
 RERANK_CATALOG = _ensure_in_tuple(RERANK_MODEL, _DEFAULT_RERANK_MODELS)
 
-# Minimum hardware requirements, sizes, and architectural metadata for models.
 MODEL_METADATA = {
-    # Chat models
     "llama3.2:3b": {
         "min_vram": "3 GB",
         "disk_size": "~2.0 GB",
@@ -51,13 +42,6 @@ MODEL_METADATA = {
         "params": "1.2B",
         "context": "128k ctx",
         "description": "Ultra-lightweight edge model with minimal memory footprint.",
-    },
-    "qwen3:4b": {
-        "min_vram": "3.5 GB",
-        "disk_size": "~2.6 GB",
-        "params": "4B",
-        "context": "32k ctx",
-        "description": "Strong reasoning, multilingual support, and coding capabilities.",
     },
     "qwen2.5:3b": {
         "min_vram": "3 GB",
@@ -80,10 +64,6 @@ MODEL_METADATA = {
         "context": "128k ctx",
         "description": "Microsoft compact reasoning model with high benchmark performance.",
     },
-    # Embedding model. Only one is ever active (RAG_EMBED_MODEL) -- the
-    # collection's stored vectors are pinned to whichever model wrote them, so
-    # there is no catalog of switchable alternatives here, just metadata for
-    # whatever EMBED_MODEL currently resolves to.
     "nomic-embed-text": {
         "min_vram": "500 MB",
         "disk_size": "~274 MB",
@@ -91,7 +71,6 @@ MODEL_METADATA = {
         "context": "8192 ctx • 768 dim",
         "description": "Default embedding model for vectorstore retrieval with large context window.",
     },
-    # Reranker models
     "cross-encoder/ms-marco-MiniLM-L-6-v2": {
         "min_vram": "300 MB",
         "disk_size": "~80 MB",
@@ -136,70 +115,37 @@ MODEL_METADATA = {
     },
 }
 
-# Chat models only -- embed and rerank models are not downloadable through the
-# UI's pull flow (embed has a single pinned active model; rerank pulls happen
-# through pull_reranker's HuggingFace path instead).
 _OLLAMA_PULLABLE = CATALOG
 
-# Timeout for reading progress lines from Ollama.
 PULL_READ_TIMEOUT_SECONDS = 60.0
 
 
 def _installed_names() -> set[str]:
     try:
-        resp = httpx.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5.0)
-        resp.raise_for_status()
+        return ollama_model_names()
     except httpx.HTTPError:
-        # Ollama unreachable -- treat as "nothing installed".
         return set()
-    return {m["name"] for m in resp.json().get("models", [])}
-
-
-def _is_installed(model: str, names: set[str]) -> bool:
-    # Fall back to comparing name without tag if catalog entry doesn't specify one.
-    if model in names:
-        return True
-    if ":" not in model:
-        return any(name.split(":", 1)[0] == model for name in names)
-    return False
 
 
 def list_installed() -> list[str]:
-    """Catalog chat models actually present in the Ollama instance right now."""
     names = _installed_names()
-    return [m for m in CATALOG if _is_installed(m, names)]
+    return [m for m in CATALOG if model_is_installed(m, names)]
 
 
 def embed_installed() -> bool:
-    """Whether EMBED_MODEL is present in the Ollama instance right now."""
-    return _is_installed(EMBED_MODEL, _installed_names())
+    return model_is_installed(EMBED_MODEL, _installed_names())
 
 
 def rerankers_installed() -> list[str]:
-    """Reranker models from RERANK_CATALOG actually present in local HuggingFace cache."""
-    try:
-        from huggingface_hub import CacheNotFound, scan_cache_dir
-    except ImportError:
-        return []
-    try:
-        cache = scan_cache_dir()
-    except CacheNotFound:
-        return []
-    except Exception as exc:  # noqa: BLE001 - a status check must not 500 the page
-        log("warning", "reranker cache probe failed", error=repr(exc))
-        return []
-    cached_repos = {repo.repo_id for repo in cache.repos}
-    return [m for m in RERANK_CATALOG if m in cached_repos]
+    cached = rerank.hf_cached_repos()
+    return [m for m in RERANK_CATALOG if m in cached]
 
 
 def reranker_installed(model: str = RERANK_MODEL) -> bool:
-    """Whether a specific reranker model is in the local HuggingFace cache."""
     return model in rerankers_installed()
 
 
 def pull_ollama_model(model: str, on_progress, should_stop=None) -> None:
-    """Stream a model pull from Ollama, reporting progress as it downloads.
-    Stopping is cooperative; should_stop is polled between streamed lines."""
     if model not in _OLLAMA_PULLABLE and model != EMBED_MODEL:
         raise ValueError(f"{model!r} is not downloadable here: {list(_OLLAMA_PULLABLE)}")
 
@@ -207,11 +153,6 @@ def pull_ollama_model(model: str, on_progress, should_stop=None) -> None:
         "POST",
         f"{OLLAMA_BASE_URL}/api/pull",
         json={"model": model},
-        # No overall deadline -- a multi-GB pull legitimately runs for many
-        # minutes -- but a per-read one, so a server that stops sending
-        # progress lines fails instead of hanging this job forever (a hang is
-        # also what made a "cancelled" pull keep running: iter_lines never
-        # came back, so the cancel flag was never polled).
         timeout=httpx.Timeout(None, connect=10.0, read=PULL_READ_TIMEOUT_SECONDS),
     ) as resp:
         resp.raise_for_status()
@@ -229,7 +170,6 @@ def pull_ollama_model(model: str, on_progress, should_stop=None) -> None:
 
 
 def pull_reranker(model: str = RERANK_MODEL, on_progress=None) -> None:
-    """Download a reranker model from HuggingFace Hub and load it."""
     if on_progress:
         on_progress(None, f"downloading {model}")
     rerank.ensure_loaded(model)
@@ -238,7 +178,6 @@ def pull_reranker(model: str = RERANK_MODEL, on_progress=None) -> None:
 
 
 def delete_ollama_model(model: str) -> None:
-    """Delete a model from Ollama."""
     resp = httpx.request(
         "DELETE",
         f"{OLLAMA_BASE_URL}/api/delete",
@@ -249,27 +188,20 @@ def delete_ollama_model(model: str) -> None:
 
 
 def delete_reranker(model: str = RERANK_MODEL) -> None:
-    """Delete a reranker model from the local HuggingFace cache."""
-    try:
-        from huggingface_hub import CacheNotFound, scan_cache_dir
-    except ImportError:
+    if model not in rerank.hf_cached_repos():
         return
-    try:
-        cache = scan_cache_dir()
-        for repo in cache.repos:
-            if repo.repo_id == model:
-                delete_strategy = cache.delete_revisions(*[r.commit_hash for r in repo.revisions])
-                delete_strategy.execute()
-                break
-    except CacheNotFound:
-        pass
+    from huggingface_hub import scan_cache_dir
+
+    cache = scan_cache_dir()
+    for repo in cache.repos:
+        if repo.repo_id == model:
+            cache.delete_revisions(*[r.commit_hash for r in repo.revisions]).execute()
+            break
 
 
 def delete_model(model: str) -> None:
-    """Delete an Ollama or HuggingFace reranker model from local disk."""
     is_reranker = model in RERANK_CATALOG or model == RERANK_MODEL
     if is_reranker:
         delete_reranker(model)
     else:
         delete_ollama_model(model)
-

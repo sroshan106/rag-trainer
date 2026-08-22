@@ -8,13 +8,13 @@ A local-only retrieval-augmented generation system. Nothing leaves the machine: 
 
 Every component — the LLM, the embedding model, the cross-encoder reranker, and the vector database — runs on the host machine. No document text and no query ever leaves the host, there is no per-token cost, and the entire stack boots with `docker compose up`.
 
-The tradeoff is compute and memory management: small models like `llama3.2:3b` and `qwen3:4b` are chosen to operate within a **4GB VRAM GPU** (e.g., GTX 1050). Swapping to a hosted API later requires changing only the `ChatOllama` LLM client adapter.
+The tradeoff is compute and memory management: small models like `llama3.2:3b` and `qwen2.5:3b` are chosen to operate. Swapping to a hosted API later requires changing only the `ChatOllama` LLM client adapter.
 
 ---
 
 ## 2. The Pieces
 
-- **Ollama:** Serves local models over HTTP: chat generation (`llama3.2:3b`, `qwen3:4b`, `gemma2:2b`, `phi3.5`) and text embeddings (`nomic-embed-text`, 768 dimensions).
+- **Ollama:** Serves local models over HTTP: chat generation (`llama3.2:3b`, `qwen2.5:3b`, `gemma2:2b`, `phi3.5`) and text embeddings (`nomic-embed-text`, 768 dimensions).
 - **Postgres + pgvector:** Stores document chunks, relational metadata, and embeddings for vector similarity queries. Also maintains a generated stored `tsvector` column and GIN index for lexical search.
 - **Cross-Encoder Reranker:** Hugging Face `cross-encoder/ms-marco-MiniLM-L-6-v2` running on CPU via `sentence_transformers` to rerank fused candidate passages without consuming GPU VRAM.
 - **LangChain & LangGraph:** LangChain supplies adapters (`OllamaEmbeddings`, `PGVector`, text splitters, loaders). LangGraph orchestrates the state machine workflow (`retrieve` → `grade` → `generate` → `END`).
@@ -121,10 +121,7 @@ flowchart TD
     KEPT -->|No| REFUSE["_refusal()<br/>REFUSAL_ANSWER — no hallucinated sources"]
     KEPT -->|Yes| GEN["<b>generate_node / generate_stream</b><br/>Prompt = Plain prose context + Question<br/>ChatOllama (temperature=0, num_ctx)"]
 
-    GEN --> THINK{"Thinking Model?<br/>(qwen3*)"}
-    THINK -->|Yes| STRIP["_ThinkFilter / /no_think prompt suffix"]
-    THINK -->|No| CITE
-    STRIP --> CITE["Citations — computed in code<br/>from graded document units"]
+    GEN --> CITE["Citations — computed in code<br/>from graded document units"]
 
     REFUSE --> DONE
     CITE --> DONE[("history.complete()<br/>Answer, citations, confidence, latency breakdown")]
@@ -136,8 +133,7 @@ flowchart TD
 ### Key Query-Path Invariants:
 1. **No Retry Loop:** Retrieval is deterministic. Without query rewriting, looping on identical inputs cannot surface new chunks that cleared cutoffs the top results missed.
 2. **Deterministic Attribution:** Citations (`src/rag/citations.py`) are extracted from surviving graded chunks, mapping directly to `(file_id, unit_index)`. Small models are never asked to generate inline citations.
-3. **Thinking Suppression:** Thinking models like `qwen3` are constrained via `/no_think` prompt directives and token-level `_ThinkFilter` streaming filters to prevent UI pollution and save inference latency.
-4. **Retrieval Impact Comparison:** `ask_compare()` and `ask_direct()` execute grounded vs direct LLM generation side-by-side without writing ad-hoc test queries to query history.
+3. **Retrieval Impact Comparison:** `ask_compare()` and `ask_direct()` execute grounded vs direct LLM generation side-by-side without writing ad-hoc test queries to query history.
 
 ---
 
@@ -191,7 +187,7 @@ System metrics are collected server-side (`src/observability/sysmetrics.py`) usi
 |---|---|---|
 | **Baked into the index** | Chunk size, chunk overlap, embedding model (`RAG_EMBED_MODEL`) | Re-ingesting the corpus |
 | **Live per query** | Chat model (`model`), candidate fetch count (`RAG_FETCH_K`), relevance floor/ratio, reranker toggle (`RAG_RERANK`) | Takes effect on the next query |
-| **Server-owned** | `DATABASE_URL`, `OLLAMA_BASE_URL`, `RAG_NUM_CTX_QWEN3` | Server restart; never exposed to browser |
+| **Server-owned** | `DATABASE_URL`, `OLLAMA_BASE_URL`, `RAG_NUM_CTX` | Server restart; never exposed to browser |
 
 ---
 

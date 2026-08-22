@@ -38,7 +38,7 @@ The following capabilities have been fully implemented and verified in the codeb
 
 - **Retrieval Inspector:** Add a dedicated visual panel illustrating the retrieval candidate funnel (dense + lexical hits, RRF rank fusion, cross-encoder rerank ordering, and grading cutoffs).
 - **Closed-Loop Evaluation:** Add thumbs up/down feedback on answers in the Ask view, persisting ratings to `query_history` and optionally appending difficult questions to benchmark test suites.
-- **Prompt Budget Warning:** Dynamically calculate prompt token consumption against model context limits (e.g. `QWEN3_NUM_CTX=3072`) and display visual warnings in the UI before generation starts.
+- **Prompt Budget Warning:** Dynamically calculate prompt token consumption against model context limits (e.g. `RAG_NUM_CTX=8192`) and display visual warnings in the UI before generation starts.
 - **Multi-Turn Conversations:** Implement a `rewrite` graph node to condense conversational chat history into standalone retrieval queries, persisting thread session IDs.
 - **UI Polish:** Drag-and-drop dropzone improvements for all supported file types, pre-ingest CSV dry run preview, and persistent metric ring buffers for charts.
 

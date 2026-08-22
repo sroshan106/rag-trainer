@@ -3,14 +3,13 @@ Fuses dense search (paraphrase) and lexical search (literal phrases) to cover bo
 Scores are fused by rank, not by value, since their scales are not comparable.
 """
 
-import os
-
 from langchain_core.documents import Document
 
+from src.config import get_settings
 from src.vectorstore import lexical
 
 # Standard RRF damping to prevent either retriever from dominating.
-RRF_K = int(os.environ.get("RAG_RRF_K", "60"))
+RRF_K = get_settings().rrf_k
 
 DENSE_SCORE_KEY = "relevance_score"
 LEXICAL_SCORE_KEY = "lexical_score"

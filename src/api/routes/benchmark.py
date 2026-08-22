@@ -1,12 +1,13 @@
 """The Benchmark view's backing routes.
 
-Wraps tests.benchmark.run_benchmark.run_all as a background job.
+Wraps ``src.benchmark.runner.run_all`` as a background job.
 """
 
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
+from src.api.deps import validated_model
 from src.api.schemas import (
     BenchmarkRequest,
     BenchmarkTestFileEntry,
@@ -59,27 +60,12 @@ def list_models() -> dict:
     return {"models": list_installed()}
 
 
-def _validated_model(model: str | None) -> str:
-    installed = list_installed()
-    if model not in installed:
-        if not installed:
-            raise HTTPException(
-                status_code=422,
-                detail="no chat model downloaded -- download one in Settings first",
-            )
-        raise HTTPException(
-            status_code=422,
-            detail=f"unknown model {model!r} -- choose from {installed}",
-        )
-    return model
-
-
 @router.post("/compare", response_model=CompareResponse)
 def compare(body: CompareRequest) -> dict:
     """Run the same query grounded (retrieval on) and direct (retrieval off)
     against the same model, for seeing what retrieval/embedding actually
     changes about the answer. Neither side touches query history."""
-    model = _validated_model(body.model)
+    model = validated_model(body.model)
     try:
         grounded = ask_compare(body.query, model=model)
         direct = ask_direct(body.query, model=model)
@@ -90,8 +76,7 @@ def compare(body: CompareRequest) -> dict:
 
 @router.get("/test-files", response_model=list[BenchmarkTestFileEntry])
 def list_test_files() -> list[dict]:
-    """List all available benchmark test suites."""
-    return benchmark_files.list_test_files()
+    return benchmark_files.get_uploaded_test_files()
 
 
 @router.post("/test-files/upload", response_model=BenchmarkTestFileEntry, status_code=201)
@@ -125,7 +110,6 @@ def upload_test_file(
 
 @router.delete("/test-files/{file_id}")
 def delete_test_file(file_id: str) -> dict:
-    """Delete a benchmark test suite."""
     try:
         deleted = benchmark_files.delete_test_file(file_id)
     except KeyError:
@@ -140,17 +124,7 @@ def start_benchmark(body: BenchmarkRequest) -> dict:
             status_code=503,
             detail="benchmark runner is not available",
         )
-    installed = list_installed()
-    if body.model not in installed:
-        if not installed:
-            raise HTTPException(
-                status_code=422,
-                detail="no chat model downloaded -- download one in Settings first",
-            )
-        raise HTTPException(
-            status_code=422,
-            detail=f"unknown model {body.model!r} -- choose from {installed}",
-        )
+    validated_model(body.model)
 
     resolved_paths: list[str] | None = None
     if body.test_files:

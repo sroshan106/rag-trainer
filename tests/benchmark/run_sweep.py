@@ -36,9 +36,9 @@ def _reconfigure(floor: float, ratio: float) -> None:
     directly rather than through the environment -- reloading the module would
     also discard the cached vectorstore and LLM clients between grid points.
     """
-    run_benchmark_nodes = importlib.import_module("src.rag.nodes")
-    run_benchmark_nodes.RELEVANCE_FLOOR = floor
-    run_benchmark_nodes.RELEVANCE_RATIO = ratio
+    grade = importlib.import_module("src.rag.grade")
+    grade.RELEVANCE_FLOOR = floor
+    grade.RELEVANCE_RATIO = ratio
 
 
 def combined_score(results: list[dict]) -> dict:

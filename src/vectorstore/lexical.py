@@ -1,14 +1,13 @@
 """Full-text (lexical) retrieval over pgvector's stored rows, fused with dense search in hybrid.py."""
 
-import os
-
 import sqlalchemy as sa
 from langchain_core.documents import Document
 
+from src.config import get_settings
 from src.db.engine import get_engine
 from src.vectorstore.store import COLLECTION_NAME
 
-TEXT_CONFIG = os.environ.get("RAG_TSVECTOR_CONFIG", "english")
+TEXT_CONFIG = get_settings().tsvector_config
 TSV_COLUMN = "doc_tsv"
 
 # websearch_to_tsquery accepts free-form user input safely.
@@ -28,7 +27,6 @@ LIMIT :k
 
 
 def _engine(connection: str | None = None) -> sa.Engine:
-    """Pooled engine, reused across queries."""
     return get_engine(connection)
 
 

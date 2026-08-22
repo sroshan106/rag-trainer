@@ -127,7 +127,7 @@ def _save_manifest(entries: list[dict]) -> None:
 
 
 def get_uploaded_test_files() -> list[dict]:
-    """Return all uploaded test files."""
+    """Every uploaded suite whose stored file still exists, pruning the rest."""
     manifest = _load_manifest()
     valid_entries = []
     changed = False
@@ -143,11 +143,6 @@ def get_uploaded_test_files() -> list[dict]:
         _save_manifest(valid_entries)
 
     return valid_entries
-
-
-def list_test_files() -> list[dict]:
-    """List all available benchmark test files."""
-    return get_uploaded_test_files()
 
 
 def save_uploaded_test_file(
@@ -230,11 +225,6 @@ def delete_test_file(file_id: str) -> dict:
     stored_path.unlink(missing_ok=True)
     _save_manifest(manifest)
     return entry
-
-
-def delete_uploaded_test_file(file_id: str) -> dict:
-    """Delete an uploaded test file by its ID."""
-    return delete_test_file(file_id)
 
 
 def resolve_test_file_path(file_id_or_name: str) -> Path:

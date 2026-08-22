@@ -1,4 +1,4 @@
-"""Phase 4: embeddings + pgvector store."""
+"""Embedding and pgvector-backed storage of document chunks."""
 
 import os
 import time
@@ -13,20 +13,23 @@ from langchain_core.documents import Document
 from langchain_ollama import OllamaEmbeddings
 from langchain_postgres import PGVector
 
+from src.config import get_settings
 from src.db.engine import get_engine
 
+_settings = get_settings()
+
 COLLECTION_NAME = "rag_chunks"
-EMBED_MODEL = os.environ.get("RAG_EMBED_MODEL", "nomic-embed-text")
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+EMBED_MODEL = _settings.embed_model
+OLLAMA_BASE_URL = _settings.ollama_base_url
 
 # Chunks per embedding request. One request for a whole corpus is what killed
 # a 40k-chunk ingest: the Ollama model runner died mid-call and took 70 minutes
 # of work with it, since nothing had been written yet.
-EMBED_BATCH_SIZE = int(os.environ.get("RAG_EMBED_BATCH", "512"))
+EMBED_BATCH_SIZE = _settings.embed_batch_size
 # Concurrent embedding requests. Worth raising only if Ollama is started with a
 # matching OLLAMA_NUM_PARALLEL; otherwise the extra requests just queue.
-EMBED_WORKERS = int(os.environ.get("RAG_EMBED_WORKERS", "4"))
-EMBED_RETRIES = int(os.environ.get("RAG_EMBED_RETRIES", "3"))
+EMBED_WORKERS = _settings.embed_workers
+EMBED_RETRIES = _settings.embed_retries
 
 # Called with (fraction_complete, message) as batches land.
 ProgressHook = Callable[[float, str], None]
@@ -36,14 +39,27 @@ class EmbedModelNotInstalled(RuntimeError):
     """EMBED_MODEL isn't pulled into Ollama yet."""
 
 
+def ollama_model_names() -> set[str]:
+    """Every model tag the local Ollama reports. Raises if it is unreachable."""
+    resp = httpx.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5.0)
+    resp.raise_for_status()
+    return {m["name"] for m in resp.json().get("models", [])}
+
+
+def model_is_installed(model: str, names: set[str]) -> bool:
+    """Whether ``model`` is among ``names``, ignoring the tag when it omits one."""
+    if model in names:
+        return True
+    if ":" not in model:
+        return any(name.split(":", 1)[0] == model for name in names)
+    return False
+
+
 def _require_embed_model() -> None:
     """Fail fast instead of letting every embed request 404 and retry into
     the same wall. Ingestion should not silently trigger a multi-hundred-MB
     download -- pull EMBED_MODEL explicitly from Settings > Embeddings."""
-    resp = httpx.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5.0)
-    resp.raise_for_status()
-    names = {m["name"] for m in resp.json().get("models", [])}
-    if EMBED_MODEL in names or any(n.split(":", 1)[0] == EMBED_MODEL for n in names):
+    if model_is_installed(EMBED_MODEL, ollama_model_names()):
         return
     raise EmbedModelNotInstalled(
         f"Embedding model {EMBED_MODEL!r} is not installed. "

@@ -1,6 +1,7 @@
 """Routes for adding documents to the system."""
 
 import hashlib
+import json
 import uuid
 from pathlib import Path
 
@@ -28,9 +29,6 @@ MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 JOB_KIND = "ingest"
 
 
-import json
-
-
 def _ingest_job(
     path: str,
     file_record_id: str,
@@ -40,16 +38,10 @@ def _ingest_job(
     citation_columns: list[str] | None = None,
 ):
     def run(reporter: ProgressReporter) -> dict:
-        ingest_kwargs = {}
-        if index_columns is not None:
-            ingest_kwargs["index_columns"] = index_columns
-        if citation_columns is not None:
-            ingest_kwargs["citation_columns"] = citation_columns
-
         def report(fraction: float, message: str) -> None:
             # Checked on every progress tick (each embedding batch included) so
-            # a cancel takes effect within one batch instead of only after the
-            # whole ingest -- previously it just relabeled the finished job.
+            # a cancel takes effect within one batch rather than after the whole
+            # ingest.
             reporter.raise_if_cancelled()
             reporter.update(progress=fraction, message=message)
 
@@ -59,7 +51,8 @@ def _ingest_job(
             splitter=splitter,
             file_id=file_record_id,
             filename=filename,
-            **ingest_kwargs,
+            index_columns=index_columns,
+            citation_columns=citation_columns,
         )
         file_history.set_chunk_ids(file_record_id, result.get("chunk_ids", []))
         return result
@@ -163,12 +156,14 @@ def upload_and_ingest(
         )
 
     try:
-        doc_kwargs = {}
-        if parsed_index_columns is not None:
-            doc_kwargs["index_columns"] = parsed_index_columns
-        if parsed_citation_columns is not None:
-            doc_kwargs["citation_columns"] = parsed_citation_columns
-        documents = len(load_documents(target, filename=original, **doc_kwargs))
+        documents = len(
+            load_documents(
+                target,
+                filename=original,
+                index_columns=parsed_index_columns,
+                citation_columns=parsed_citation_columns,
+            )
+        )
     except (UnreadableFile, UnsupportedFileType) as exc:
         target.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -180,18 +175,14 @@ def upload_and_ingest(
         target.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail="the file has no usable text")
 
-    record_kwargs = {"documents": documents}
-    if parsed_index_columns is not None:
-        record_kwargs["index_columns"] = parsed_index_columns
-    if parsed_citation_columns is not None:
-        record_kwargs["citation_columns"] = parsed_citation_columns
-
     record_id = file_history.record(
         filename=original,
         stored_path=target,
         sha256=sha256,
         size_bytes=size,
-        **record_kwargs,
+        documents=documents,
+        index_columns=parsed_index_columns,
+        citation_columns=parsed_citation_columns,
     )
     try:
         return _submit(
@@ -210,13 +201,12 @@ def upload_and_ingest(
 
 @router.get("/history", response_model=list[IngestFileEntry])
 def list_ingested_files(limit: int = 50) -> list[dict]:
-    """List ingested files."""
     return file_history.recent(limit)
 
 
 @router.delete("/files/{file_id}")
 def delete_ingested_file(file_id: str) -> dict:
-    """Delete an uploaded file."""
+    """Remove the upload, its stored copy, and its vectors."""
     if runner.active(JOB_KIND) is not None:
         raise HTTPException(status_code=409, detail="an ingest is running")
 
@@ -242,6 +232,5 @@ def delete_ingested_file(file_id: str) -> dict:
 
 @router.get("/active", response_model=JobResponse | None)
 def active_ingest() -> dict | None:
-    """Get the active ingest job."""
     job = runner.active(JOB_KIND)
     return job.to_dict() if job else None

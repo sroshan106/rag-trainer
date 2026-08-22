@@ -69,8 +69,7 @@ def start_pull(body: PullModelRequest) -> dict:
             model_catalog.pull_reranker(body.model, on_progress)
         else:
             # Cooperative stop, same as the benchmark job: polled between the
-            # pull's progress lines, so a cancel lands within one line instead
-            # of never (the download previously ran to completion regardless).
+            # pull's progress lines, so a cancel lands within one line.
             model_catalog.pull_ollama_model(
                 body.model, on_progress, should_stop=lambda: reporter.cancelled
             )
