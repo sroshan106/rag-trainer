@@ -1,5 +1,3 @@
-"""Citations assembled from the provenance stamped at ingest."""
-
 from langchain_core.documents import Document
 
 from src.rag.citations import citations_enabled, collect_citations, format_citations
@@ -25,7 +23,6 @@ def test_citation_names_the_file_and_the_unit():
 
 
 def test_two_chunks_of_the_same_unit_cite_it_once():
-    """Splitting a long row produces several chunks of one citable unit."""
     citations = collect_citations([_doc("first half"), _doc("second half")])
 
     assert len(citations) == 1
@@ -46,7 +43,6 @@ def test_retrieval_rank_order_is_preserved():
 
 
 def test_chunks_without_provenance_are_dropped():
-    """Chunks embedded before ingest recorded provenance cannot be cited."""
     citations = collect_citations([_doc(file_id=None), _doc(unit_index=None), _doc()])
 
     assert len(citations) == 1

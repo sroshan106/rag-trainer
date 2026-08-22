@@ -1,10 +1,3 @@
-"""Tests for the benchmark result cache itself.
-
-The cache is what makes an interrupted benchmark resumable, and a cache that
-silently does nothing looks identical to a working one from the outside -- so
-its behaviour is asserted rather than assumed.
-"""
-
 from tests.benchmark import run_benchmark
 from tests.benchmark.cache import ResultCache
 
@@ -19,8 +12,6 @@ def test_roundtrip_survives_reopen(tmp_path):
 
 
 def test_empty_cache_is_not_falsy(tmp_path):
-    """Regression: __len__ made a fresh cache falsy, so `cache or fallback`
-    swapped the real cache for a disabled one and nothing was ever written."""
     with ResultCache(tmp_path / "c.jsonl") as cache:
         assert cache is not None
         assert len(cache) == 0
@@ -36,7 +27,6 @@ def test_disabled_cache_reads_and_writes_nothing(tmp_path):
 
 
 def test_truncated_final_line_is_skipped(tmp_path):
-    """A run killed mid-write can leave a partial JSON line."""
     path = tmp_path / "c.jsonl"
     with ResultCache(path) as cache:
         cache.put("suite", "good", {"answer": "a"})
@@ -49,7 +39,6 @@ def test_truncated_final_line_is_skipped(tmp_path):
 
 
 def test_eval_uses_the_cache_it_is_given(tmp_path, monkeypatch):
-    """The whole point of passing a cache in: answers must land in it."""
     test_csv = tmp_path / "test.csv"
     test_csv.write_text("question,answer\nq1,a1\nq2,a2\nq3,a3\n")
     monkeypatch.setattr(

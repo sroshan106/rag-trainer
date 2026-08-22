@@ -45,11 +45,7 @@ export default function App() {
       >
         Skip to content
       </a>
-      {/*
-        Floating chrome, not an opaque strip: content scrolls underneath a
-        translucent material. The bottom edge is a hairline at 60% rather than
-        a full divider so the bar reads as a layer above the page, not a seam.
-      */}
+
       <header className="chrome-blur sticky top-0 z-50 border-b border-hairline/60 bg-canvas/72 backdrop-blur-xl backdrop-saturate-150">
         <div className="max-w-6xl mx-auto flex items-center justify-between px-4 py-2.5">
           <div className="flex items-center gap-3">
@@ -87,7 +83,7 @@ export default function App() {
             <Route path="/" element={<Navigate to="/ask" replace />} />
             <Route path="/ask" element={<Ask />} />
             <Route path="/ingest" element={<Ingest />} />
-            {/* Not in NAV: reached from a citation or a knowledge-base entry. */}
+
             <Route path="/documents/:fileId" element={<DocumentPage />} />
             <Route path="/system" element={<SystemView />} />
             <Route path="/benchmark" element={<Benchmark />} />

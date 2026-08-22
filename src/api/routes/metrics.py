@@ -23,12 +23,10 @@ def get_logs(
     level: str | None = None,
     q: str | None = None,
 ) -> list[dict]:
-    """Return recent in-memory log entries from the ring buffer."""
     return tail(limit=limit, level=level, query=q)
 
 
 async def frame_generator(request: Request):
-    """The stream body, factored out so tests can drive it without a live socket."""
     while True:
         if await request.is_disconnected():
             break

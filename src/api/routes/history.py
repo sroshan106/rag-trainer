@@ -1,5 +1,3 @@
-"""Read and delete access for stored question/answer history."""
-
 from fastapi import APIRouter, HTTPException, Query
 
 from src.api.schemas import HistoryEntry
@@ -28,7 +26,6 @@ def clear_history() -> dict:
 
 @router.delete("/{entry_id}", status_code=200)
 def delete_entry(entry_id: str) -> dict:
-    """Drop a single exchange from history."""
     deleted = history.delete(entry_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="no such history entry")

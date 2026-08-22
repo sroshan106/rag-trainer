@@ -1,26 +1,11 @@
 @import "tailwindcss";
 
-/*
- * Apple-style light theme.
- *
- * Neutrals follow Apple's system greys (canvas #f5f5f7 / surface white /
- * label #1d1d1f) rather than a Tailwind grey ramp: Apple's greys are slightly
- * warm, which is what keeps a white-on-grey UI from reading as clinical.
- * `accent` is system indigo -- the one Apple hue that stays cool and vivid
- * while still clearing 4.5:1 against white.
- */
 @theme {
   --color-canvas: #f5f5f7;
   --color-surface: #ffffff;
   --color-surface-2: #f5f5f7;
   --color-surface-3: #ebebf0;
 
-  /*
-   * Four label levels, all >= 4.5:1 on both `surface` and `canvas`. Apple's own
-   * tertiary grey (#86868b) only clears 3.6:1, which is fine for their large
-   * marketing type but not for the 11-13px labels this UI is built from -- so
-   * the lower two steps are darkened until they pass.
-   */
   --color-ink: #1d1d1f;
   --color-ink-2: #424245;
   --color-ink-3: #5f5f66;
@@ -34,11 +19,6 @@
   --color-accent-soft: #eeeefc;
   --color-accent-line: #d9d8f8;
 
-  /*
-   * A big surface reads as thicker than a small one: a near-contact hairline
-   * shadow plus a wide, soft ambient one. Both are far lighter than a stock
-   * Tailwind shadow -- on a light canvas, heavy drop shadows read as grime.
-   */
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px -14px rgba(0, 0, 0, 0.12);
   --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.05), 0 16px 40px -18px rgba(0, 0, 0, 0.22);
 }
@@ -55,10 +35,6 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/*
- * Tracking is size-specific: large text reads too loose at its default
- * spacing, so headings tighten as they grow while body copy stays at 0.
- */
 h1 {
   letter-spacing: -0.022em;
 }
@@ -67,7 +43,6 @@ h3 {
   letter-spacing: -0.015em;
 }
 
-/* Press feedback lands on pointer-down, not on release. */
 button:not(:disabled) {
   transition: transform 100ms ease-out;
 }
@@ -75,7 +50,6 @@ button:not(:disabled):active {
   transform: scale(0.97);
 }
 
-/* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -105,7 +79,6 @@ button:not(:disabled):active {
   }
 }
 
-/* Translucent chrome goes frosty-solid when the user asks for less transparency. */
 @media (prefers-reduced-transparency: reduce) {
   .chrome-blur {
     background: var(--color-surface) !important;

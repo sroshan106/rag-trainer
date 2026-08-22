@@ -1,5 +1,3 @@
-"""Full-text (lexical) retrieval over pgvector's stored rows, fused with dense search in hybrid.py."""
-
 import sqlalchemy as sa
 from langchain_core.documents import Document
 
@@ -10,7 +8,6 @@ from src.vectorstore.store import COLLECTION_NAME
 TEXT_CONFIG = get_settings().tsvector_config
 TSV_COLUMN = "doc_tsv"
 
-# websearch_to_tsquery accepts free-form user input safely.
 _SEARCH_SQL = f"""
 SELECT e.id,
        e.document,
@@ -31,7 +28,6 @@ def _engine(connection: str | None = None) -> sa.Engine:
 
 
 def ensure_index(connection: str | None = None) -> bool:
-    """Create tsvector column and GIN index if absent. Idempotent."""
     with _engine(connection).begin() as conn:
         exists = conn.execute(
             sa.text(
@@ -43,7 +39,6 @@ def ensure_index(connection: str | None = None) -> bool:
         if exists:
             return False
 
-        # STORED generated column backfills and stays correct for future inserts.
         conn.execute(
             sa.text(
                 f"ALTER TABLE langchain_pg_embedding "
@@ -66,7 +61,6 @@ def search(
     collection: str = COLLECTION_NAME,
     connection: str | None = None,
 ) -> list[tuple[Document, float]]:
-    """Return the top-k lexical matches with their ts_rank_cd scores."""
     with _engine(connection).connect() as conn:
         rows = conn.execute(
             sa.text(_SEARCH_SQL),

@@ -1,5 +1,3 @@
-"""Grading node: relevance filtering, dual cutoffs, and lexical hit preservation."""
-
 from src.config import get_settings
 from src.observability import tracing
 from src.vectorstore import hybrid

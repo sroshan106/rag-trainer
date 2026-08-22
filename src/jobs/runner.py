@@ -1,5 +1,3 @@
-"""In-process background job registry for long-running requests."""
-
 import threading
 import time
 import traceback
@@ -16,7 +14,6 @@ MAX_CONCURRENT_JOBS = 8
 
 
 class JobAlreadyRunning(Exception):
-    """Raised by JobRunner.submit_exclusive when the kind is already busy."""
 
     def __init__(self, job: "Job"):
         self.job = job
@@ -24,7 +21,7 @@ class JobAlreadyRunning(Exception):
 
 
 class JobCancelled(Exception):
-    """Raised by a job body that noticed its cancel event and stopped early."""
+    pass
 
 
 @dataclass
@@ -39,13 +36,7 @@ class Job:
     params: dict | None = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
-    # Set by ``JobRunner.cancel``. Cooperative: nothing interrupts the thread,
-    # the body is expected to poll ``ProgressReporter.cancelled`` at whatever
-    # granularity it can stop cleanly at.
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
-    # The runner hands every job *its* lock, so a snapshot below is taken under
-    # the same lock the worker threads mutate these fields with. Defaults to a
-    # private one so a stand-alone Job is still safe to read.
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def to_dict(self) -> dict:
@@ -68,7 +59,6 @@ class Job:
 
 
 class ProgressReporter:
-    """Passed into a job body so it can report progress without knowing about Job."""
 
     def __init__(self, job: "Job", lock: threading.Lock):
         self._job = job
@@ -80,7 +70,6 @@ class ProgressReporter:
         message: str | None = None,
         result: Any = None,
     ) -> None:
-        """Publish progress and optional partial result."""
         with self._lock:
             if progress is not None:
                 self._job.progress = max(0.0, min(1.0, progress))
@@ -100,7 +89,6 @@ class ProgressReporter:
 
 
 class JobRunner:
-    """Registry of jobs keyed by id, executed on a managed worker pool."""
 
     def __init__(self, max_workers: int = MAX_CONCURRENT_JOBS) -> None:
         self._jobs: dict[str, Job] = {}
@@ -124,7 +112,6 @@ class JobRunner:
         fn: Callable[[ProgressReporter], Any],
         params: dict | None = None,
     ) -> Job:
-        """Submit, but only if no job of this kind is active."""
         job = Job(id=str(uuid.uuid4()), kind=kind, params=params, lock=self._lock)
         with self._lock:
             running = self._active_locked(kind)
@@ -154,7 +141,7 @@ class JobRunner:
                 with self._lock:
                     job.status = "cancelled"
                     job.updated_at = time.time()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 with self._lock:
                     job.status = "failed"
                     job.error = f"{exc}\n{traceback.format_exc()}"
@@ -170,7 +157,6 @@ class JobRunner:
             return self._jobs.get(job_id)
 
     def cancel(self, job_id: str) -> bool:
-        """Ask a job to stop. False if it has already finished."""
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None or job.status in TERMINAL_STATUSES:
@@ -179,7 +165,6 @@ class JobRunner:
         return True
 
     def active(self, kind: str) -> Job | None:
-        """The pending-or-running job of this kind, if one exists."""
         with self._lock:
             return self._active_locked(kind)
 
@@ -203,5 +188,4 @@ class JobRunner:
                 del self._jobs[j.id]
 
 
-# Process-wide singleton -- routes import this rather than constructing their own.
 runner = JobRunner()

@@ -1,9 +1,3 @@
-"""Documents built from units, and the provenance metadata they carry.
-
-Unit boundaries and numbering are covered in test_units.py; what is pinned here
-is the metadata a retrieved chunk needs in order to be traced back to a file.
-"""
-
 import json
 
 import pytest
@@ -25,7 +19,6 @@ def test_load_documents_stamps_provenance_onto_every_document(tmp_path):
 
 
 def test_unit_index_locates_the_row_while_row_index_holds_the_dataset_key(tmp_path):
-    """These two must not be conflated -- see KEY_COLUMNS in units.py."""
     path = tmp_path / "corpus.csv"
     path.write_text("passage,id\nfirst,9797\nsecond,15908939\n", encoding="utf-8")
 
@@ -50,7 +43,6 @@ def test_filename_defaults_to_the_path_when_not_given(tmp_path):
 
 
 def test_missing_file_id_is_tolerated(tmp_path):
-    """files.record returns None when the provenance write fails."""
     path = tmp_path / "notes.txt"
     path.write_text("hello", encoding="utf-8")
 
@@ -67,7 +59,6 @@ def test_a_url_column_rides_along_when_present(tmp_path):
 
 
 def test_whole_row_is_embedded_without_picking_a_text_column(tmp_path):
-    """The original complaint: a passage,id file needed no 'text' column."""
     path = tmp_path / "bioasq.csv"
     path.write_text("passage,id\nsome biomedical text,9797\n", encoding="utf-8")
 

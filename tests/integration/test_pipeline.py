@@ -1,11 +1,3 @@
-"""Phase 8: end-to-end integration tests against live Postgres + Ollama.
-
-Excluded from the default run (see pytest.ini) because they need both services
-up and an ingested vectorstore. Run with:
-
-    RAG_INTEGRATION=1 pytest -m integration
-"""
-
 import os
 
 import pytest
@@ -15,26 +7,21 @@ pytestmark = pytest.mark.integration
 if not os.environ.get("RAG_INTEGRATION"):
     pytest.skip("set RAG_INTEGRATION=1 to run", allow_module_level=True)
 
-from src.observability import tracing  # noqa: E402
-from src.rag.graph import ask, graph  # noqa: E402
-from src.rag.grade import RELEVANCE_FLOOR, SCORE_KEY  # noqa: E402
-from src.rag.models import AVAILABLE_MODELS  # noqa: E402
+from src.observability import tracing
+from src.rag.graph import ask, graph
+from src.rag.grade import RELEVANCE_FLOOR, SCORE_KEY
+from src.rag.models import AVAILABLE_MODELS
 
-# No default model exists anymore -- these tests exercise the pipeline
-# end-to-end and must name one explicitly, same as any real caller would.
 TEST_MODEL = AVAILABLE_MODELS[0]
 
-# A fact that is unambiguously in tests/benchmark/data/documents.csv. If the corpus changes,
-# this is the assertion that needs updating.
 KNOWN_QUERY = "What are Bullet Kin?"
-KNOWN_FACT = "enem"  # "enemy"/"enemies" — matches without pinning exact phrasing
+KNOWN_FACT = "enem"
 KNOWN_SOURCE = "enterthegungeon.fandom.com"
 
 OFF_TOPIC_QUERY = "asdkjh qwe zxc nonsense gibberish"
 
 
 def _urls(result: dict) -> list[str]:
-    """The link each citation points at. See src/rag/citations.py."""
     return [c["url"] for c in result["citations"] if c.get("url")]
 
 
@@ -47,8 +34,6 @@ def test_known_query_returns_grounded_answer():
 
 
 def test_known_query_cites_only_relevant_sources():
-    # Regression guard: before relevance grading, this query cited unrelated
-    # documents about fantasy books and GPT tutorials alongside the real hit.
     result = ask(KNOWN_QUERY, model=TEST_MODEL)
 
     assert all(KNOWN_SOURCE in url for url in _urls(result))
@@ -64,9 +49,6 @@ def test_citations_locate_the_row_they_came_from():
 
 
 def test_citation_fields_carry_the_source_columns():
-    # The corpus declares ``index`` and ``source_url``; both are lifted out as
-    # citation fields at ingest, so an answer can name where a row came from
-    # rather than only where it sits. See src/ingestion/units.py.
     result = ask(KNOWN_QUERY, model=TEST_MODEL)
 
     assert result["citations"]

@@ -1,5 +1,3 @@
-"""Structured JSON logging with an in-process ring buffer for the Logs view."""
-
 import collections
 import json
 import logging
@@ -32,18 +30,16 @@ class JsonFormatter(logging.Formatter):
 
 
 class RingBufferHandler(logging.Handler):
-    """Appends each formatted record to the shared ring buffer as a dict."""
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
             formatted = json.loads(self.format(record))
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
         _ring.append(formatted)
 
 
 def configure_logging(level: int = logging.INFO) -> None:
-    """Attach stdout + ring-buffer handlers once. Safe to call repeatedly."""
     if logger.handlers:
         return
     formatter = JsonFormatter()
@@ -61,13 +57,11 @@ def configure_logging(level: int = logging.INFO) -> None:
 
 
 def log(level: str, message: str, **fields) -> None:
-    """Convenience entry point: log('info', 'message', key=val)."""
     configure_logging()
     logger.log(getattr(logging, level.upper(), logging.INFO), message, extra={"fields": fields})
 
 
 def tail(limit: int = 200, level: str | None = None, query: str | None = None) -> list[dict]:
-    """Most recent buffered log records, optionally filtered by level and query."""
     records = list(_ring)
     if level:
         min_no = getattr(logging, level.upper(), 0)

@@ -1,9 +1,3 @@
-"""FastAPI instance for the RAG dashboard.
-
-Binds to 127.0.0.1 by default: no auth, single user, local tool. Served by
-``uvicorn src.api.app:app`` or ``python -m src.api.app``.
-"""
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -25,9 +19,6 @@ _settings = get_settings()
 HOST = _settings.api_host
 PORT = _settings.api_port
 
-# The Vite dev server runs on a different origin during development; the
-# production build is served same-origin (see ui/README) and needs no CORS
-# entry at all. Only localhost origins are allowed -- this is a local tool.
 DEV_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",

@@ -1,5 +1,3 @@
-"""Re-export from src.benchmark.cache for test compatibility."""
-
 import sys
 from src.benchmark import cache
 

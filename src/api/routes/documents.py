@@ -1,12 +1,3 @@
-"""Read back the documents that were ingested.
-
-Citations name a file and a unit inside it; this is what lets the UI show that
-unit. What is served is the text as the ingest pipeline read it, not a
-rendering of the original file -- for a PDF that means the extracted page text
-the embedding was actually built from. Showing the model's view is the point:
-a citation the reader cannot check against what was retrieved is decorative.
-"""
-
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -31,12 +22,6 @@ MAX_PAGE = 200
 
 
 def _stored_path(file_id: str) -> tuple[Path, dict]:
-    """Resolve a file id to a path on disk, or raise.
-
-    The path comes out of our own database, but it is still confined to the
-    upload directory before anything opens it: a corrupted or hand-edited
-    record would otherwise turn this endpoint into an arbitrary file read.
-    """
     entry = file_history.get(file_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="no such document")
@@ -52,7 +37,6 @@ def _stored_path(file_id: str) -> tuple[Path, dict]:
 
 @contextmanager
 def _guarded():
-    """Translate reader failures into responses rather than 500s."""
     try:
         yield
     except UnsupportedFileType as exc:
@@ -65,7 +49,6 @@ def _guarded():
 
 @router.get("/{file_id}", response_model=DocumentMeta)
 def document_meta(file_id: str) -> dict:
-    """What the viewer needs before it asks for any text."""
     path, entry = _stored_path(file_id)
     if not is_supported(path):
         raise HTTPException(status_code=415, detail="unsupported document type")
@@ -73,7 +56,6 @@ def document_meta(file_id: str) -> dict:
     try:
         columns = csv_columns(path)
     except (OSError, UnicodeDecodeError):
-        # Only affects table rendering; the units still read fine.
         columns = None
 
     return {
@@ -81,9 +63,6 @@ def document_meta(file_id: str) -> dict:
         "filename": entry["filename"],
         "extension": path.suffix.lower(),
         "unit_kind": unit_kind(path),
-        # Counted at ingest. Recounting would mean re-parsing the whole file on
-        # every page load, which on a 60MB corpus is seconds of work to
-        # reproduce a number already stored.
         "units": entry.get("documents"),
         "size_bytes": entry["size_bytes"],
         "created_at": entry["created_at"],
@@ -100,7 +79,6 @@ def document_units(
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=MAX_PAGE),
 ) -> list[dict]:
-    """A window of the document, sliced by position."""
     path, entry = _stored_path(file_id)
     with _guarded():
         return [
@@ -113,7 +91,6 @@ def document_units(
 
 @router.get("/{file_id}/units/{index}", response_model=UnitEntry)
 def document_unit(file_id: str, index: int) -> dict:
-    """One unit, addressed the way a citation addresses it."""
     path, entry = _stored_path(file_id)
     with _guarded():
         unit = read_unit(path, index, citation_columns=entry.get("citation_columns"))

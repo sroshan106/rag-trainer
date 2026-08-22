@@ -1,10 +1,3 @@
-"""Unit boundaries and numbering.
-
-These are the contract the document viewer and the citations both depend on:
-if a unit index moves, every stored citation silently starts pointing at the
-wrong text, so the numbering is pinned here rather than left implicit.
-"""
-
 import json
 
 import pytest
@@ -43,7 +36,6 @@ def test_csv_row_serialises_every_content_column(tmp_path):
 
 
 def test_a_single_content_column_alongside_an_id_emits_bare_text(tmp_path):
-    """rag-mini-bioasq's shape: once id is lifted out, only the passage is left."""
     path = tmp_path / "docs.csv"
     path.write_text("passage,id\nsome text here,9797\n", encoding="utf-8")
 
@@ -74,17 +66,10 @@ def test_csv_row_with_no_content_yields_no_unit_but_does_not_shift_later_rows(tm
     units = list(iter_units(path))
 
     assert len(units) == 1
-    # Still row 2 -- numbering follows the file, not the surviving units.
     assert units[0].index == 2
 
 
 def test_columns_lifted_into_metadata_are_not_also_embedded(tmp_path):
-    """Shaped after the benchmark corpus, whose source_url column is huge.
-
-    Embedding the id and the link would spend the chunk's budget on text no
-    question can be asked about, and would only appear in a long row's first
-    chunk anyway.
-    """
     path = tmp_path / "documents.csv"
     path.write_text(
         "index,source_url,text\n0,https://example.com/very/long/link,the real content\n",
@@ -99,7 +84,6 @@ def test_columns_lifted_into_metadata_are_not_also_embedded(tmp_path):
 
 
 def test_a_row_of_only_metadata_yields_no_unit(tmp_path):
-    """Nothing left to embed once the id and link are lifted out."""
     path = tmp_path / "bare.csv"
     path.write_text("index,source_url\n0,https://example.com/a\n", encoding="utf-8")
 
@@ -107,11 +91,6 @@ def test_a_row_of_only_metadata_yields_no_unit(tmp_path):
 
 
 def test_csv_key_comes_from_an_id_column_and_is_not_the_position(tmp_path):
-    """The distinction the benchmark's recall scoring depends on.
-
-    Shaped after rag-mini-bioasq, where the passage with id 31776899 is the
-    37946th row -- position and dataset key are unrelated numbers.
-    """
     path = tmp_path / "corpus.csv"
     path.write_text("passage,id\nfirst,9797\nsecond,15908939\n", encoding="utf-8")
 
@@ -122,7 +101,6 @@ def test_csv_key_comes_from_an_id_column_and_is_not_the_position(tmp_path):
 
 
 def test_csv_key_prefers_an_explicit_index_column(tmp_path):
-    """The built-in benchmark corpus numbers its index column from 0."""
     path = tmp_path / "documents.csv"
     path.write_text("index,source_url,text\n0,https://x/a,hello\n", encoding="utf-8")
 
@@ -212,7 +190,6 @@ def test_jsonl_is_numbered_by_physical_line(tmp_path):
 
     units = list(iter_units(path))
 
-    # Blank second line yields no unit, and the third line keeps its number.
     assert [u.index for u in units] == [1, 3]
     assert units[0].kind == KIND_LINE
 

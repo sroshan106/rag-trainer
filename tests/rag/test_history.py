@@ -1,10 +1,3 @@
-"""Query-history behaviour, exercised against SQLite rather than Postgres.
-
-The table is created from the same SQLAlchemy metadata either way, so the
-insert/read path is real; only JSONB degrades to JSON. What matters most here
-is the failure policy: recording must never be able to break a query.
-"""
-
 import pytest
 import sqlalchemy as sa
 
@@ -14,7 +7,6 @@ from src.rag import history
 
 def record(query, answer, citations=(), refused=False, latency_ms=None, model=None,
            confidence=None):
-    """Test helper: start + complete in one call, mirroring the old one-shot record()."""
     entry_id = history.start(query, model=model)
     history.complete(
         entry_id,
@@ -39,11 +31,9 @@ CITATION = {
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
-    """A throwaway database, with the module's engine cache cleared around it."""
     url = f"sqlite:///{tmp_path / 'history.db'}"
     monkeypatch.setattr(db_engine, "_engines", {})
     monkeypatch.setattr(db_engine, "_initialized", set())
-    # JSONB is Postgres-only; the column type is swapped for the SQLite run.
     for column in (history.query_history.c.sources, history.query_history.c.citations):
         monkeypatch.setattr(column, "type", sa.JSON(), raising=False)
     monkeypatch.setenv("DATABASE_URL", url)
@@ -67,18 +57,12 @@ def test_record_then_read_back(db):
 
 
 def test_refusal_is_recorded_from_the_flag_not_inferred_from_citations(db):
-    """A refusal is what the graph decided, not what the citation list looks like."""
     entry_id = record("off topic?", "I don't have enough context.", [], refused=True)
 
     assert history.get(entry_id)["refused"] is True
 
 
 def test_an_answer_with_no_citable_chunks_is_not_a_refusal(db):
-    """Chunks predating provenance ground an answer but cannot be cited.
-
-    Under the old rule -- refused = not sources -- this row was mislabelled a
-    refusal despite the model having answered from real context.
-    """
     entry_id = record("who said it?", "Ruby did.", [], refused=False, confidence=0.7)
 
     entry = history.get(entry_id)
@@ -104,7 +88,6 @@ def test_disabled_history_records_nothing(db, monkeypatch):
 
 
 def test_a_write_failure_does_not_raise(db, monkeypatch, caplog):
-    """The whole point of the try/except: a broken database must not lose the answer."""
     monkeypatch.setattr(
         history, "_engine", lambda connection=None: (_ for _ in ()).throw(OSError("down"))
     )

@@ -290,7 +290,7 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Delete Confirmation Warning Modal */}
+
       {modelToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/25 backdrop-blur-sm animate-in fade-in duration-200">
           <div
@@ -504,5 +504,3 @@ function ModelRow({ row, info, job, onDownload, onCancel, onDeleteRequest, delet
     </div>
   );
 }
-
-

@@ -46,9 +46,7 @@ function timeAgo(dateString) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-// Mirrors src/ingestion/units.py URL_COLUMNS/KEY_COLUMNS -- used only to
-// pre-check the columns the backend would otherwise auto-detect, so the
-// default selection matches what ingest does when nothing is specified.
+
 const CITATION_HINTS = [
   "source_url",
   "source",
@@ -139,10 +137,8 @@ export default function Ingest() {
       const headers = parseCsvHeaders(content);
       const cited = headers.filter((h) => CITATION_HINTS.includes(h.toLowerCase()));
       setCsvColumns(headers);
-      // Identifier and URL columns default to cited-but-not-indexed: embedding
-      // a 130-character link spends the chunk's budget on text nobody asks a
-      // question about. Both checkboxes stay independent, so either can be
-      // overridden per column.
+
+
       setSelectedColumns(headers.filter((h) => !cited.includes(h)));
       setCitationColumns(cited);
     };
@@ -257,7 +253,7 @@ export default function Ingest() {
 
   return (
     <div className="flex flex-col gap-6 max-w-4xl mx-auto">
-      {/* Page Header */}
+
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-ink">Ingest</h1>
         <p className="text-sm text-ink-3 mt-1">Add documents to your knowledge base</p>
@@ -273,9 +269,9 @@ export default function Ingest() {
         </div>
       )}
 
-      {/* Upload Box matching mockup */}
+
       <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
-        {/* Dropzone area */}
+
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -318,7 +314,7 @@ export default function Ingest() {
           </button>
         </div>
 
-        {/* CSV Columns Selector */}
+
         {file && csvColumns.length > 0 && (
           <div className="mt-4 rounded-xl border border-hairline bg-surface-2 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
@@ -427,7 +423,7 @@ export default function Ingest() {
           </div>
         )}
 
-        {/* Processing mode + Upload button row */}
+
         <div className="flex flex-wrap items-center justify-between gap-4 mt-5 pt-4 border-t border-hairline">
           <div className="flex items-center gap-3">
             <span className="text-xs font-medium text-ink-3">Processing mode</span>
@@ -466,7 +462,7 @@ export default function Ingest() {
         </div>
       </div>
 
-      {/* In-Flight Job Status Card */}
+
       {job && (
         <Card title="Ingestion Progress" className="border-accent-line bg-accent-soft">
           <div className="flex items-center justify-between gap-3 mb-3">
@@ -524,9 +520,9 @@ export default function Ingest() {
         </Card>
       )}
 
-      {/* Knowledge Base Section matching mockup */}
+
       <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
-        {/* Knowledge Base Header with Summary & Search */}
+
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
           <div>
             <h2 className="text-base font-bold text-ink">Knowledge base</h2>
@@ -550,7 +546,7 @@ export default function Ingest() {
           </div>
         </div>
 
-        {/* Document List */}
+
         {filteredHistory.length === 0 ? (
           <div className="py-12 text-center text-ink-4 text-xs">
             {searchQuery ? "No matching documents found." : "No documents ingested yet. Upload a file above to start."}
@@ -677,4 +673,3 @@ export default function Ingest() {
     </div>
   );
 }
-

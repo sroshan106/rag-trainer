@@ -17,17 +17,9 @@ def test_metrics_snapshot_has_cpu_memory_disk():
     assert "cpu" in body
     assert "memory" in body
     assert "disk" in body
-    # gpu is optional -- absent when NVML can't be initialized on this host.
 
 
 class _FakeRequest:
-    """Disconnects after ``n`` polls, so the generator under test terminates.
-
-    Driving ``EventSourceResponse`` itself needs a live ASGI connection to
-    signal disconnect -- exercised for real via a running uvicorn server
-    (see manual verification in the task report). This tests the generator's
-    own logic in isolation: it stops polling once the client is gone.
-    """
 
     def __init__(self, disconnect_after: int):
         self._n = disconnect_after

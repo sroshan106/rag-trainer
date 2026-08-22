@@ -125,7 +125,7 @@ export default function Benchmark() {
     try {
       setHistory(await benchmarkHistory());
     } catch {
-      // Ignore
+
     }
   }
 
@@ -310,7 +310,7 @@ export default function Benchmark() {
 
   return (
     <div className="flex flex-col gap-6 max-w-4xl mx-auto">
-      {/* Page Header */}
+
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-ink">Benchmark Suite</h1>
         <p className="text-sm text-ink-3 mt-1">
@@ -333,7 +333,7 @@ export default function Benchmark() {
         </div>
       )}
 
-      {/* Config Card */}
+
       <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-hairline">
           <div className="flex items-center gap-2 text-sm font-semibold text-ink">
@@ -455,7 +455,7 @@ export default function Benchmark() {
         </div>
       </div>
 
-      {/* Test Suites Management Card */}
+
       <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-hairline">
           <div className="flex items-center gap-2">
@@ -579,7 +579,7 @@ export default function Benchmark() {
         )}
       </div>
 
-      {/* Upload Custom Suite Modal */}
+
       {showUploadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/25 backdrop-blur-sm">
           <div className="relative w-full max-w-lg rounded-2xl border border-hairline bg-surface p-6 shadow-2xl">
@@ -605,7 +605,7 @@ export default function Benchmark() {
             )}
 
             <form onSubmit={onSaveCustomSuite} className="mt-4 flex flex-col gap-4">
-              {/* File Drop / Select Area */}
+
               <div>
                 <label className="text-xs font-medium text-ink-2 block mb-1.5">
                   Select CSV File
@@ -631,7 +631,7 @@ export default function Benchmark() {
                 </div>
               </div>
 
-              {/* Column Mapping Section */}
+
               {uploadHeaders.length > 0 && (
                 <div className="rounded-xl border border-hairline bg-surface-2 p-3.5 flex flex-col gap-3">
                   <span className="text-xs font-semibold text-ink">Column Matching</span>
@@ -740,7 +740,7 @@ export default function Benchmark() {
         </div>
       )}
 
-      {/* Retrieval Impact Check */}
+
       <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
         <div className="flex items-center gap-2 text-sm font-semibold text-ink mb-1">
           <GitCompare className="h-4 w-4 text-accent" />
@@ -837,7 +837,7 @@ export default function Benchmark() {
         )}
       </div>
 
-      {/* Current Run Card */}
+
       {job && (
         <Card title="Current Run" className="border-accent-line bg-accent-soft">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
@@ -858,7 +858,7 @@ export default function Benchmark() {
         </Card>
       )}
 
-      {/* History Card */}
+
       <div className="rounded-2xl border border-hairline bg-surface p-6 shadow-card">
         <h2 className="text-base font-bold text-ink mb-1">Benchmark History</h2>
         <p className="text-xs text-ink-3 mb-4">Past evaluations from this session, newest first</p>
@@ -1108,4 +1108,3 @@ function ResultsTable({ results, partial = false }) {
     </div>
   );
 }
-

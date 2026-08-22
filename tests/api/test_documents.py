@@ -1,10 +1,3 @@
-"""Reading stored documents back.
-
-The path guard is the point of several of these: stored_path is server-side
-state that ends up in an ``open()``, so it is confined to the upload directory
-regardless of what the record says.
-"""
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -25,7 +18,6 @@ def uploads(tmp_path, monkeypatch):
 
 @pytest.fixture
 def store(monkeypatch):
-    """In-memory stand-in for the ingested-files table."""
     entries: dict[str, dict] = {}
     monkeypatch.setattr(
         documents_route.file_history, "get", lambda file_id: entries.get(file_id)
@@ -129,7 +121,6 @@ def test_unknown_document_is_a_404(client, store, uploads):
 def test_a_record_pointing_outside_the_upload_directory_is_refused(
     client, store, uploads, tmp_path
 ):
-    """A hand-edited or corrupted record must not become an arbitrary file read."""
     secret = tmp_path / "secret.csv"
     secret.write_text("passage\ntop secret\n", encoding="utf-8")
     _add(store, uploads, path=secret)

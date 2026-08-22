@@ -1,17 +1,3 @@
-"""Resumable result cache for the benchmark runner.
-
-A benchmark pass is ~120 live LLM calls. Interrupting one and starting over
-throws away every completed answer, so results are appended to a JSONL file as
-they finish and replayed on the next run.
-
-The cache is keyed by a fingerprint of the configuration that can change an
-answer -- model, embedding model, k, the reranker, and the two grading
-thresholds. Changing any of them writes to a different file, so a run after a
-threshold change can never silently reuse answers produced under the old
-cutoff, and a rerank-on/rerank-off comparison cannot answer itself from the
-other side's cache.
-"""
-
 import hashlib
 import json
 import threading
@@ -25,7 +11,6 @@ CACHE_DIR = Path("tests/benchmark/.cache")
 
 
 def config_fingerprint(model: str) -> str:
-    """Short hash of every setting that could change a cached answer."""
     payload = json.dumps(
         {
             "model": model,
@@ -43,11 +28,6 @@ def config_fingerprint(model: str) -> str:
 
 
 class ResultCache:
-    """Append-only JSONL store of per-question results, keyed by (suite, question).
-
-    Writes are flushed per record rather than buffered, so a Ctrl-C mid-run
-    leaves every completed question on disk.
-    """
 
     def __init__(self, path: Path, enabled: bool = True):
         self.path = path
@@ -81,7 +61,6 @@ class ResultCache:
                 try:
                     record = json.loads(line)
                 except json.JSONDecodeError:
-                    # A run killed mid-write can leave a truncated final line.
                     continue
                 self._entries[(record["suite"], record["question"])] = record
 

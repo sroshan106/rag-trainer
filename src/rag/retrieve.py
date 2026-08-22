@@ -1,5 +1,3 @@
-"""Retrieval node: dense k-NN + lexical search + Reciprocal Rank Fusion + Cross-Encoder reranking."""
-
 import threading
 
 from src.config import env_flag, get_settings
@@ -20,12 +18,10 @@ _vs_lock = threading.Lock()
 
 
 def hybrid_enabled() -> bool:
-    """Fuse full-text results with the dense ones."""
     return env_flag("RAG_HYBRID", default=True)
 
 
 def get_vectorstore():
-    """Lazily load query-path vectorstore."""
     global _vectorstore
     if _vectorstore is None:
         with _vs_lock:

@@ -1,5 +1,3 @@
-"""Routes for adding documents to the system."""
-
 import hashlib
 import json
 import uuid
@@ -39,9 +37,6 @@ def _ingest_job(
 ):
     def run(reporter: ProgressReporter) -> dict:
         def report(fraction: float, message: str) -> None:
-            # Checked on every progress tick (each embedding batch included) so
-            # a cancel takes effect within one batch rather than after the whole
-            # ingest.
             reporter.raise_if_cancelled()
             reporter.update(progress=fraction, message=message)
 
@@ -94,7 +89,6 @@ def list_splitters() -> dict:
 
 
 def _parse_columns(raw: str | None) -> list[str] | None:
-    """A JSON array or comma-separated list of column names, from a form field."""
     if not raw:
         return None
     try:
@@ -206,7 +200,6 @@ def list_ingested_files(limit: int = 50) -> list[dict]:
 
 @router.delete("/files/{file_id}")
 def delete_ingested_file(file_id: str) -> dict:
-    """Remove the upload, its stored copy, and its vectors."""
     if runner.active(JOB_KIND) is not None:
         raise HTTPException(status_code=409, detail="an ingest is running")
 

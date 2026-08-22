@@ -51,7 +51,6 @@ def test_component_scores_are_stamped(monkeypatch):
 
 
 def test_empty_lexical_list_falls_back_to_dense_order(monkeypatch):
-    """Off-topic queries match no tsvector, so fusion must degrade to dense."""
     first = Document(page_content="first", metadata={})
     second = Document(page_content="second", metadata={})
     store = FakeVectorstore([(first, 0.45), (second, 0.44)])
@@ -74,7 +73,6 @@ def test_result_is_truncated_to_k(monkeypatch):
 
 
 def test_rrf_ties_break_toward_the_lexical_hit(monkeypatch):
-    """Swapped ranks score identically; exact-phrase evidence wins the tie."""
     a = Document(page_content="a", metadata={})
     b = Document(page_content="b", metadata={})
     store = FakeVectorstore([(a, 0.7), (b, 0.6)])

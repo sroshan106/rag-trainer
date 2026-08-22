@@ -10,13 +10,7 @@ function hostnameOf(url) {
   }
 }
 
-/**
- * Citations under an answer.
- *
- * Accepts the current shape -- objects naming a file and a unit inside it --
- * and the bare URL strings history rows written before citations carried
- * provenance, so old exchanges keep rendering instead of going blank.
- */
+
 export default function SourceList({ citations, sources, title = "Sources", compact = false }) {
   const [open, setOpen] = useState(null);
 

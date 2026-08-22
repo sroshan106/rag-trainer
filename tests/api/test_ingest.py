@@ -1,10 +1,3 @@
-"""Ingest route behaviour, with the pipeline itself stubbed.
-
-The guard against concurrent runs is the point of most of these: embedding the
-same rows twice appends duplicates to the collection, and a disabled button in
-one browser tab cannot prevent a second tab from posting.
-"""
-
 import threading
 from pathlib import Path
 
@@ -21,7 +14,6 @@ CSV = "index,source_url,text\n1,http://example.com,hello world\n"
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
-    """A client whose job registry and upload directory are per-test."""
     monkeypatch.setattr(ingest_route, "runner", JobRunner())
     monkeypatch.setattr(ingest_route, "UPLOAD_DIR", tmp_path / "uploads")
     return TestClient(create_app())
@@ -29,11 +21,6 @@ def client(monkeypatch, tmp_path):
 
 @pytest.fixture
 def file_store(monkeypatch):
-    """An in-memory stand-in for src.ingestion.files, keyed by sha256.
-
-    The module's own DB-backed behaviour is covered in tests/ingestion/test_files.py;
-    these routes only need to know it was asked the right questions.
-    """
     entries: dict[str, dict] = {}
 
     def find_by_hash(sha256):
@@ -90,7 +77,6 @@ def file_store(monkeypatch):
 
 @pytest.fixture
 def stub_delete_chunks(monkeypatch):
-    """Replace the real vector-store delete; returns the lists it was called with."""
     calls = []
     monkeypatch.setattr(ingest_route, "delete_chunks", lambda ids: calls.append(list(ids)))
     return calls
@@ -98,7 +84,6 @@ def stub_delete_chunks(monkeypatch):
 
 @pytest.fixture
 def stub_ingest(monkeypatch):
-    """Replace the real pipeline; returns the list of calls it received."""
     calls = []
 
     def fake(path, progress=None, splitter=None, file_id=None, filename=None):
@@ -182,7 +167,6 @@ def test_duplicate_upload_does_not_leave_a_second_copy_on_disk(client, stub_inge
 
 
 def test_upload_accepts_a_csv_with_arbitrary_columns(client, stub_ingest, file_store):
-    """No schema is imposed: the whole row is embedded, whatever it is called."""
     response = client.post(
         "/api/ingest/upload",
         files={"file": ("bioasq.csv", "passage,id\nsome text,9797\n", "text/csv")},
@@ -199,8 +183,6 @@ def test_upload_passes_the_original_filename_through_for_citations(
     client.post("/api/ingest/upload", files={"file": ("mine.csv", CSV, "text/csv")})
     _wait_idle()
 
-    # The stored copy is uuid-prefixed, so the original name has to be carried
-    # separately or a citation would name a file the user never saw.
     assert stub_ingest[0]["filename"] == "mine.csv"
     assert stub_ingest[0]["file_id"] is not None
     assert "mine.csv" not in Path(stub_ingest[0]["path"]).name.split("-")[0]
@@ -270,7 +252,7 @@ def test_upload_passes_the_chosen_splitter_through(client, stub_ingest, file_sto
     _wait_idle()
 
     entry = next(iter(file_store.values()))
-    assert entry["chunk_ids"] == ["chunk-1"]  # sanity: the job did run
+    assert entry["chunk_ids"] == ["chunk-1"]
 
 
 def test_upload_rejects_an_unknown_splitter(client, stub_ingest, file_store):
@@ -388,7 +370,6 @@ def test_active_reports_the_running_job_then_nothing(client, monkeypatch, file_s
 
 
 def test_benchmark_default_workers_matches_the_measured_value():
-    """8 workers thrashed the 4GB card; the schema default must not drift back."""
     from tests.benchmark.run_benchmark import DEFAULT_WORKERS
 
     assert schemas.BenchmarkRequest().workers == DEFAULT_WORKERS

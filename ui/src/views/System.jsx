@@ -14,8 +14,7 @@ import { metricsStreamUrl } from "../api.js";
 
 const HISTORY_LENGTH = 120;
 
-// Three hues that stay distinguishable on a white plot and hold 3:1 against it
-// as 2px strokes. Legend, line, and tooltip all read from this one list.
+
 const SERIES = [
   { key: "cpu", label: "CPU", color: "#5e5ce6" },
   { key: "vram", label: "VRAM", color: "#e5484d" },
@@ -133,7 +132,7 @@ export default function SystemView() {
         />
       </div>
 
-      {/* Real-time Chart */}
+
       <Card
         title="Hardware Metrics over Time"
         subtitle="Tracking CPU, GPU utilization, and VRAM memory usage continuously."
@@ -175,7 +174,7 @@ export default function SystemView() {
         </div>
       </Card>
 
-      {/* Memory & Storage Cards */}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card title="System Memory & Swap">
           {frame ? (
@@ -285,4 +284,3 @@ function Gauge({ label, value, unit, icon: Icon, color = "accent", warn, detail 
     </div>
   );
 }
-

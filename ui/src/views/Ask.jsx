@@ -202,13 +202,13 @@ export default function Ask() {
 
   return (
     <div className="flex flex-col gap-6 max-w-4xl mx-auto">
-      {/* Page Header */}
+
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-ink">Ask Question</h1>
         <p className="text-sm text-ink-3 mt-1">Query your knowledge base through the RAG pipeline</p>
       </div>
 
-      {/* Query Box */}
+
       <div className="rounded-2xl border border-hairline bg-surface p-5 shadow-card">
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <div className="relative">
@@ -273,7 +273,7 @@ export default function Ask() {
           </div>
         </form>
 
-        {/* Starter suggestion chips */}
+
         {rows.length === 0 && !live && (
           <div className="mt-4 pt-4 border-t border-hairline">
             <div className="text-xs font-medium text-ink-3 mb-2.5 flex items-center gap-1.5">
@@ -299,7 +299,7 @@ export default function Ask() {
         )}
       </div>
 
-      {/* Warnings */}
+
       {modelsLoaded && models.length === 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 flex items-start gap-3">
           <AlertTriangle className="h-5 w-5 text-amber-700 shrink-0 mt-0.5" />
@@ -340,7 +340,7 @@ export default function Ask() {
         </div>
       )}
 
-      {/* Live in-flight exchange */}
+
       {live && (
         <Exchange
           entry={live}
@@ -351,14 +351,14 @@ export default function Ask() {
         />
       )}
 
-      {/* History Error */}
+
       {historyError && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
           History unavailable: {historyError}
         </div>
       )}
 
-      {/* History Items */}
+
       {rows.map((entry) => (
         <Exchange
           key={entry.id}
@@ -385,4 +385,3 @@ export default function Ask() {
     </div>
   );
 }
-

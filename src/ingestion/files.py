@@ -1,5 +1,3 @@
-"""Backing storage for uploaded documents."""
-
 import hashlib
 import json
 import logging
@@ -34,13 +32,10 @@ ingested_files = sa.Table(
     sa.Column("citation_columns", sa.JSON().with_variant(JSONB, "postgresql"), nullable=True),
 )
 
-# Columns added after the table's initial release. Each gets an ALTER TABLE
-# fallback below so a pre-existing database picks it up without a migration.
 _ADDED_COLUMNS = ("index_columns", "citation_columns")
 
 
 def _create_table(engine: sa.Engine) -> None:
-    """One-off setup the first time a given database is used."""
     _metadata.create_all(engine, tables=[ingested_files])
     with engine.begin() as conn:
         try:
@@ -68,7 +63,6 @@ def _engine(connection: str | None = None) -> sa.Engine:
 
 
 def hash_file(fileobj: BinaryIO, chunk_size: int = 1024 * 1024) -> str:
-    """SHA-256 of a whole binary stream, read from wherever the cursor is."""
     digest = hashlib.sha256()
     for chunk in iter(lambda: fileobj.read(chunk_size), b""):
         digest.update(chunk)
@@ -106,7 +100,6 @@ def _row_to_dict(row) -> dict:
 
 
 def find_by_hash(sha256: str, connection: str | None = None) -> dict | None:
-    """The earlier ingest of this exact content, if there was one."""
     stmt = sa.select(ingested_files).where(ingested_files.c.sha256 == sha256)
     with _engine(connection).connect() as conn:
         row = conn.execute(stmt).first()
@@ -130,7 +123,6 @@ def record(
     citation_columns: list[str] | None = None,
     connection: str | None = None,
 ) -> str | None:
-    """Store one file's provenance. Returns its id, or None if not stored."""
     entry_id = str(uuid.uuid4())
     try:
         with _engine(connection).begin() as conn:
@@ -147,14 +139,13 @@ def record(
                     citation_columns=citation_columns,
                 )
             )
-    except Exception:  # noqa: BLE001 - provenance is auxiliary, never fatal
+    except Exception:
         logger.warning("failed to record ingested file", exc_info=True)
         return None
     return entry_id
 
 
 def set_chunk_ids(entry_id: str, chunk_ids: list[str], connection: str | None = None) -> None:
-    """Fill in a file's vector-store ids once its ingest job has finished."""
     try:
         with _engine(connection).begin() as conn:
             conn.execute(
@@ -162,19 +153,17 @@ def set_chunk_ids(entry_id: str, chunk_ids: list[str], connection: str | None = 
                 .where(ingested_files.c.id == entry_id)
                 .values(chunk_ids=list(chunk_ids))
             )
-    except Exception:  # noqa: BLE001 - provenance is auxiliary, never fatal
+    except Exception:
         logger.warning("failed to record chunk ids for %s", entry_id, exc_info=True)
 
 
 def delete(entry_id: str, connection: str | None = None) -> bool:
-    """Remove one file's record. Returns whether a row was actually removed."""
     with _engine(connection).begin() as conn:
         result = conn.execute(ingested_files.delete().where(ingested_files.c.id == entry_id))
     return result.rowcount > 0
 
 
 def recent(limit: int = 50, connection: str | None = None) -> list[dict]:
-    """Most recently ingested files first."""
     stmt = (
         sa.select(ingested_files)
         .order_by(ingested_files.c.created_at.desc())

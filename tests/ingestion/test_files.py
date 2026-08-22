@@ -1,9 +1,3 @@
-"""Ingested-file provenance, exercised against SQLite rather than Postgres.
-
-Mirrors tests/rag/test_history.py -- same throwaway-database approach, since
-the table is created from the same SQLAlchemy metadata either way.
-"""
-
 import io
 
 import pytest
@@ -15,11 +9,9 @@ from src.ingestion import files
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
-    """A throwaway database, with the module's engine cache cleared around it."""
     url = f"sqlite:///{tmp_path / 'files.db'}"
     monkeypatch.setattr(db_engine, "_engines", {})
     monkeypatch.setattr(db_engine, "_initialized", set())
-    # JSONB is Postgres-only; the column type is swapped for the SQLite run.
     monkeypatch.setattr(
         files.ingested_files.c.chunk_ids, "type", sa.JSON(), raising=False
     )
@@ -109,7 +101,6 @@ def test_delete_returns_false_for_an_unknown_id(db):
 
 
 def test_a_write_failure_does_not_raise(db, monkeypatch):
-    """Same failure policy as query history: never break a caller over provenance."""
     monkeypatch.setattr(
         files, "_engine", lambda connection=None: (_ for _ in ()).throw(OSError("down"))
     )

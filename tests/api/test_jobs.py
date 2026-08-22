@@ -77,8 +77,6 @@ def test_benchmark_runs_as_background_job(monkeypatch):
 
 
 def test_benchmark_publishes_partial_results_while_running(monkeypatch):
-    """A run that reports progress must expose metrics before it finishes --
-    otherwise every config change costs a full run before it can be judged."""
     partial = [{"name": "single_passage", "n": 10, "recall@5": 0.5}]
     seen = threading.Event()
 
@@ -106,7 +104,6 @@ def test_benchmark_cancel_keeps_partial_result(monkeypatch):
         on_progress(partial, 10, 30)
         while not should_stop():
             time.sleep(0.01)
-        # Mirrors the real runner: stop early, return what was scored so far.
         return partial
 
     monkeypatch.setattr("src.api.routes.benchmark.run_all", fake_run_all)

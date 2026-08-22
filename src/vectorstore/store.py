@@ -1,5 +1,3 @@
-"""Embedding and pgvector-backed storage of document chunks."""
-
 import os
 import time
 import uuid
@@ -22,32 +20,24 @@ COLLECTION_NAME = "rag_chunks"
 EMBED_MODEL = _settings.embed_model
 OLLAMA_BASE_URL = _settings.ollama_base_url
 
-# Chunks per embedding request. One request for a whole corpus is what killed
-# a 40k-chunk ingest: the Ollama model runner died mid-call and took 70 minutes
-# of work with it, since nothing had been written yet.
 EMBED_BATCH_SIZE = _settings.embed_batch_size
-# Concurrent embedding requests. Worth raising only if Ollama is started with a
-# matching OLLAMA_NUM_PARALLEL; otherwise the extra requests just queue.
 EMBED_WORKERS = _settings.embed_workers
 EMBED_RETRIES = _settings.embed_retries
 
-# Called with (fraction_complete, message) as batches land.
 ProgressHook = Callable[[float, str], None]
 
 
 class EmbedModelNotInstalled(RuntimeError):
-    """EMBED_MODEL isn't pulled into Ollama yet."""
+    pass
 
 
 def ollama_model_names() -> set[str]:
-    """Every model tag the local Ollama reports. Raises if it is unreachable."""
     resp = httpx.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5.0)
     resp.raise_for_status()
     return {m["name"] for m in resp.json().get("models", [])}
 
 
 def model_is_installed(model: str, names: set[str]) -> bool:
-    """Whether ``model`` is among ``names``, ignoring the tag when it omits one."""
     if model in names:
         return True
     if ":" not in model:
@@ -56,9 +46,6 @@ def model_is_installed(model: str, names: set[str]) -> bool:
 
 
 def _require_embed_model() -> None:
-    """Fail fast instead of letting every embed request 404 and retry into
-    the same wall. Ingestion should not silently trigger a multi-hundred-MB
-    download -- pull EMBED_MODEL explicitly from Settings > Embeddings."""
     if model_is_installed(EMBED_MODEL, ollama_model_names()):
         return
     raise EmbedModelNotInstalled(
@@ -75,12 +62,6 @@ def _embeddings(num_gpu: int | None = None) -> OllamaEmbeddings:
 def _embed_batch(
     embeddings: OllamaEmbeddings, texts: list[str], retries: int = EMBED_RETRIES
 ) -> list[list[float]]:
-    """Embed one batch, retrying and then halving it if the runner drops us.
-
-    A dead Ollama runner shows up as a reset connection on the next request, so
-    a plain retry usually succeeds. If it keeps failing the batch is split: the
-    cause may be one oversized chunk rather than the batch as a whole.
-    """
     delay = 1.0
     failure: Exception | None = None
     for attempt in range(retries):
@@ -107,15 +88,6 @@ def build_vectorstore(
     progress: ProgressHook | None = None,
     batch_size: int | None = None,
 ) -> list[str]:
-    """Embed and store ``chunks`` in batches, returning the ids used.
-
-    Ids are generated here (rather than left to PGVector's default) so a
-    caller that needs to delete these exact chunks later -- e.g. clearing one
-    uploaded file's vectors -- has something to delete by.
-
-    Each batch is written as soon as it is embedded, so a mid-run failure keeps
-    everything embedded up to that point instead of discarding the whole job.
-    """
     connection = connection or os.environ["DATABASE_URL"]
     ids = ids or [str(uuid.uuid4()) for _ in chunks]
     if not chunks:
@@ -132,10 +104,6 @@ def build_vectorstore(
 
     texts = [chunk.page_content for chunk in chunks]
 
-    # Corpora like rag-mini-bioasq repeat whole passages across rows. Identical
-    # text embeds to an identical vector, so each distinct text is sent to
-    # Ollama once and the vector is reused for every chunk that shares it --
-    # every duplicate still gets its own stored row, id, and metadata.
     positions: dict[str, list[int]] = {}
     for index, text in enumerate(texts):
         positions.setdefault(text, []).append(index)
@@ -171,7 +139,6 @@ def build_vectorstore(
 
 
 def load_vectorstore(connection: str | None = None) -> PGVector:
-    """Query-path vectorstore instance (embeds on CPU to preserve GPU VRAM)."""
     connection = connection or os.environ["DATABASE_URL"]
     return PGVector(
         embeddings=_embeddings(num_gpu=0),
@@ -181,7 +148,6 @@ def load_vectorstore(connection: str | None = None) -> PGVector:
 
 
 def delete_chunks(chunk_ids: list[str], connection: str | None = None) -> None:
-    """Remove specific stored chunks by id."""
     if not chunk_ids:
         return
     load_vectorstore(connection).delete(ids=chunk_ids)
@@ -196,7 +162,6 @@ WHERE c.name = :collection
 
 
 def count_chunks(connection: str | None = None) -> int:
-    """Return total stored chunks count in the collection, or 0 if missing/empty."""
     engine = get_engine(connection)
     try:
         with engine.connect() as conn:

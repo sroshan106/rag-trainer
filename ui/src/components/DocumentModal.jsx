@@ -3,12 +3,7 @@ import { X, Maximize2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import DocumentView from "./DocumentView.jsx";
 
-/**
- * Peek at one cited unit without leaving the answer.
- *
- * Opens compact -- only the cited unit, not the whole document -- since the
- * question being answered is "what did that citation actually say".
- */
+
 export default function DocumentModal({ fileId, focusIndex = null, onClose }) {
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();

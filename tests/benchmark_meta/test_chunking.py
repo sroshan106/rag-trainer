@@ -1,17 +1,9 @@
-"""Tests for the chunked, interleaved benchmark scheduler.
-
-The reason the suites are interleaved at all is that a stopped run must leave
-usable numbers for *every* suite -- a sequential pass would leave the last one
-at n=0. These tests pin that property, and the stop path that depends on it.
-"""
-
 import pytest
 from tests.benchmark import run_benchmark
 
 
 @pytest.fixture
 def fake_llm(monkeypatch):
-    """Replace the graph call with a deterministic stub, recording call order."""
     asked: list[str] = []
 
     def fake_run(query, model=None):
@@ -24,7 +16,6 @@ def fake_llm(monkeypatch):
 
 @pytest.fixture
 def test_suites(tmp_path):
-    """Create 3 temporary test suite CSV files."""
     s1 = tmp_path / "s1.csv"
     s2 = tmp_path / "s2.csv"
     s3 = tmp_path / "s3.csv"
@@ -46,7 +37,6 @@ def test_every_suite_reports_after_the_first_round(fake_llm, test_suites):
         on_progress=lambda metrics, done, total: ticks.append((metrics, done, total)),
     )
 
-    # Three chunks in, one per suite: every suite has answered its first 10.
     metrics, done, total = ticks[2]
     assert done == 30
     assert total == 75
@@ -74,7 +64,6 @@ def test_stopping_returns_partial_metrics_for_all_suites(fake_llm, test_suites):
     calls = {"n": 0}
 
     def should_stop():
-        # Let one chunk per suite through, then stop.
         calls["n"] += 1
         return calls["n"] > 3
 
@@ -89,7 +78,6 @@ def test_stopping_returns_partial_metrics_for_all_suites(fake_llm, test_suites):
     )
 
     assert [r["n"] for r in results] == [10, 10, 10]
-    # Partial metrics are real metrics, not placeholders.
     assert "correct_refusal_rate" in results[2]
     assert len(fake_llm) == 30
 

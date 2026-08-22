@@ -1,54 +1,22 @@
-"""Phase 8: grading-threshold sweep.
-
-RELEVANCE_FLOOR and RELEVANCE_RATIO trade answerable-question accuracy against
-correct refusal, and picking either one from a single benchmark run measures a
-point rather than the curve. This replays a sampled benchmark across a grid of
-cutoffs and reports both sides plus their combined score, so the operating
-point is argued from the curve.
-
-Each grid point is a distinct cache fingerprint, so results accumulate across
-runs and an interrupted sweep resumes.
-
-Run: python -m tests.benchmark.run_sweep --model <model> [--sample N] [--workers N]
-"""
-
 import argparse
 import importlib
 import sys
 
 from tests.benchmark import run_benchmark
 
-# Bracket the observed score distribution: off-topic queries top out around
-# 0.45 and on-topic hits start around 0.52, so the useful floors sit between.
 FLOORS = (0.44, 0.48, 0.52, 0.56, 0.60)
-# Held at one value by default. Since hybrid retrieval keeps every full-text
-# hit regardless of cosine, the ratio now only reorders dense-only documents,
-# and sweeping it doubles a run that is already dominated by generation time.
 RATIOS = (0.90,)
 
 DEFAULT_SAMPLE = 15
 
 
 def _reconfigure(floor: float, ratio: float) -> None:
-    """Rebind the cutoffs the grader reads.
-
-    The constants are module-level and read at import, so the sweep sets them
-    directly rather than through the environment -- reloading the module would
-    also discard the cached vectorstore and LLM clients between grid points.
-    """
     grade = importlib.import_module("src.rag.grade")
     grade.RELEVANCE_FLOOR = floor
     grade.RELEVANCE_RATIO = ratio
 
 
 def combined_score(results: list[dict]) -> dict:
-    """Collapse all suites into one comparable number.
-
-    Answerable suites contribute their pass rate, no-answer suites their
-    correct-refusal rate, each weighted by question count. A cutoff that wins
-    only by refusing everything, or only by answering everything, cannot score
-    well on this -- which is the whole point of sweeping.
-    """
     correct = 0.0
     total = 0
     parts = {}

@@ -57,13 +57,7 @@ function Unit({ unit, highlighted }) {
   );
 }
 
-/**
- * Renders a stored document as the ingest pipeline read it.
- *
- * `focusIndex` is a unit index from a citation. That unit is fetched directly
- * rather than paged to: it can sit 38,000 rows into a file, and paging there
- * would mean dozens of round trips.
- */
+
 export default function DocumentView({ fileId, focusIndex = null, compact = false }) {
   const [meta, setMeta] = useState(null);
   const [units, setUnits] = useState([]);
@@ -143,7 +137,7 @@ export default function DocumentView({ fileId, focusIndex = null, compact = fals
     );
   }
 
-  // The focused unit may also appear in the first page; show it once.
+
   const rest = focused ? units.filter((u) => u.index !== focused.index) : units;
 
   return (

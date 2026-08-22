@@ -1,11 +1,3 @@
-"""Settings view's backing route: what models exist, and downloading more.
-
-Pulls run as a background job through the same runner ingest/benchmark use --
-a model download is minutes over a slow connection, too long to hold a
-request open, and the job's ``result`` doubles as the last-seen progress
-fraction so a browser refresh mid-pull still shows something.
-"""
-
 import httpx
 from fastapi import APIRouter, HTTPException
 
@@ -22,18 +14,12 @@ def list_models() -> dict:
     return {
         "catalog": list(model_catalog.CATALOG),
         "installed": model_catalog.list_installed(),
-        # The embed model is pinned (mixing dimensions in one collection
-        # corrupts similarity search) -- nothing to *select* here, but it
-        # still needs an explicit download like any other model.
         "active_embed_model": model_catalog.EMBED_MODEL,
         "embed_installed": model_catalog.embed_installed(),
         "rerank_models": list(model_catalog.RERANK_CATALOG),
         "rerank_installed": model_catalog.rerankers_installed(),
         "active_rerank_model": model_catalog.RERANK_MODEL,
         "rerank_model": model_catalog.RERANK_MODEL,
-        # Whether reranking is even switched on (RAG_RERANK) -- shown
-        # alongside the download status since a downloaded-but-disabled
-        # reranker is a different state than not-downloaded.
         "rerank_enabled": rerank_enabled(),
         "model_info": model_catalog.MODEL_METADATA,
     }
@@ -57,19 +43,12 @@ def start_pull(body: PullModelRequest) -> dict:
         reporter.update(progress=0.0, message="starting download", result={"model": body.model})
 
         def on_progress(fraction: float | None, status: str) -> None:
-            # ``update`` leaves progress untouched when passed None, so a
-            # pre-manifest status line (no byte counts yet) only updates the
-            # message, not the bar.
             reporter.update(progress=fraction, message=status)
 
         if is_reranker:
-            # The HF download is one opaque blocking call with no hook to poll
-            # from, so cancellation can only be honoured at its edges.
             reporter.raise_if_cancelled()
             model_catalog.pull_reranker(body.model, on_progress)
         else:
-            # Cooperative stop, same as the benchmark job: polled between the
-            # pull's progress lines, so a cancel lands within one line.
             model_catalog.pull_ollama_model(
                 body.model, on_progress, should_stop=lambda: reporter.cancelled
             )
@@ -110,4 +89,3 @@ def delete_model(model_name: str) -> dict:
             detail=f"Failed to delete model {model_name}: {exc}",
         )
     return {"status": "deleted", "model": model_name}
-

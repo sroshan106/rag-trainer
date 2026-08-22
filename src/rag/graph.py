@@ -1,5 +1,3 @@
-"""RAG state schema, graph wiring, and the ask/stream/compare entrypoints."""
-
 import sys
 import time
 
@@ -23,19 +21,11 @@ class RAGState(TypedDict):
     graded_docs: list[Document]
     answer: str
     citations: list[dict]
-    # Set by the node that actually decides, never inferred from whether any
-    # citations came back -- a chunk can be retrieved and used while carrying
-    # no usable provenance to cite.
     refused: bool
     confidence: float
 
 
 def build_graph():
-    # Linear retrieve -> grade -> generate. There is deliberately no retry
-    # edge: retrieval is deterministic and results come back sorted by
-    # descending similarity, so re-running the same query — at any k — can
-    # never surface a chunk that clears the grader's cutoff when the top
-    # results did not. Reinstate a loop only alongside query rewriting.
     workflow = StateGraph(RAGState)
     workflow.add_node("retrieve", retrieve_node)
     workflow.add_node("grade", grade_node)
@@ -53,11 +43,7 @@ graph = build_graph()
 
 
 def _run_graph(query: str, resolved_model: str) -> tuple[dict, dict, float]:
-    """Run retrieve -> grade -> generate, returning (result, span_durations_ms, latency_ms)."""
     started = time.perf_counter()
-    # collect() runs independently of RAG_TRACE -- rerank/generate are the
-    # two spans worth breaking out for every query, not just traced ones,
-    # since they're where a slow query is actually spending its time.
     with tracing.collect() as spans, tracing.span("ask"):
         result = graph.invoke({"query": query, "model": resolved_model})
     durations = {s["span"]: s["duration_ms"] for s in spans}
@@ -65,10 +51,6 @@ def _run_graph(query: str, resolved_model: str) -> tuple[dict, dict, float]:
 
 
 def ask(query: str, model: str | None = None) -> dict:
-    """Return the answer plus the citations it was grounded in.
-
-    Model is required. Exchange is written to query history table.
-    """
     resolved_model = resolve_model(model)
     entry_id = history.start(query=query, model=resolved_model)
     try:
@@ -101,11 +83,6 @@ def ask(query: str, model: str | None = None) -> dict:
 
 
 def ask_compare(query: str, model: str | None = None) -> dict:
-    """Grounded answer -- same retrieve/grade/generate path as ``ask`` -- but
-    nothing written to query history. Pairs with ``ask_direct`` for the
-    Benchmark view's side-by-side comparison, which must not pollute Ask's
-    history with ad-hoc test queries.
-    """
     resolved_model = resolve_model(model)
     result, durations, latency_ms = _run_graph(query, resolved_model)
     return {
@@ -121,12 +98,6 @@ def ask_compare(query: str, model: str | None = None) -> dict:
 
 
 def ask_direct(query: str, model: str | None = None) -> dict:
-    """Answer with no retrieval step, and nothing written to query history.
-
-    Exists to compare against ``ask``: same model, same generation settings,
-    the only difference is that this path never touches the vectorstore. The
-    gap between the two answers is what embedding/retrieval contributed.
-    """
     resolved_model = resolve_model(model)
     started = time.perf_counter()
     result = direct_answer(resolved_model, query)
@@ -141,11 +112,6 @@ def ask_direct(query: str, model: str | None = None) -> dict:
 
 
 def ask_stream(query: str, model: str | None = None):
-    """Stream the same work ``ask`` does, as a sequence of event dicts.
-    
-    Yields stages (retrieve, grade, generate), tokens, and done/error events.
-    Closing this generator early stops generation and cancels the run.
-    """
     resolved_model = resolve_model(model)
     started = time.perf_counter()
     entry_id = history.start(query=query, model=resolved_model)
@@ -184,14 +150,11 @@ def ask_stream(query: str, model: str | None = None):
                     parts.append(text)
                     yield {"type": "token", "text": text}
             finally:
-                # Reached on cancellation too, and this is what interrupts
-                # Ollama mid-generation rather than leaving it running for an
-                # answer nobody is waiting for.
                 generation.close()
     except GeneratorExit:
         history.cancel(entry_id, "".join(parts))
         raise
-    except Exception as exc:  # noqa: BLE001 - reported to the client as an event
+    except Exception as exc:
         history.fail(entry_id)
         yield {"type": "error", "detail": str(exc), "id": entry_id}
         return
@@ -231,7 +194,6 @@ def main() -> int:
         tracing.configure_logging()
     query = " ".join(sys.argv[1:]) or "What is this document collection about?"
 
-    # CLI convenience: picks the first installed model.
     from src.rag.model_catalog import list_installed
 
     installed = list_installed()

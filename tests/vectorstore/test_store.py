@@ -23,7 +23,6 @@ class FakePGVector:
 
 
 class FakeEmbeddings:
-    """Records the batches it is asked to embed; fails on demand."""
 
     def __init__(self, fail_times=0):
         self.batches = []
@@ -39,7 +38,6 @@ class FakeEmbeddings:
 
 @pytest.fixture
 def fake_store(monkeypatch):
-    """Patch PGVector + embeddings, returning the embeddings stub in use."""
     monkeypatch.setattr(store, "PGVector", FakePGVector)
     monkeypatch.setattr(store.time, "sleep", lambda _seconds: None)
     FakePGVector.added = []
@@ -95,10 +93,7 @@ def test_build_vectorstore_embeds_and_writes_in_batches(fake_store):
 
     ids = store.build_vectorstore(chunks, connection="postgresql://test", batch_size=2)
 
-    # Batches embed concurrently (EMBED_WORKERS), so they can land out of
-    # order -- only their sizes, not their sequence, are guaranteed.
     assert sorted(len(batch) for batch in fake_store.batches) == [1, 2, 2]
-    # Writes to the store stay in start order regardless of embed order.
     assert [len(call["ids"]) for call in FakePGVector.added] == [2, 2, 1]
     assert _all_ids() == ids
     assert FakePGVector.added[0]["metadatas"] == [{"n": 0}, {"n": 1}]
@@ -178,7 +173,6 @@ def test_embed_batch_retries_a_dropped_connection(monkeypatch):
 
 def test_embed_batch_halves_a_batch_that_keeps_failing(monkeypatch):
     monkeypatch.setattr(store.time, "sleep", lambda _seconds: None)
-    # Fails every attempt on the full batch, then succeeds on the halves.
     embeddings = FakeEmbeddings(fail_times=2)
 
     vectors = store._embed_batch(embeddings, ["a", "b"], retries=2)

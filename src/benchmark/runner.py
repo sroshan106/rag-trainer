@@ -1,9 +1,3 @@
-"""Benchmark eval against test suites or custom test files.
-
-Runs the live graph (needs db + ollama up, vectorstore ingested) and
-compares actual retrieval/answers against the labeled question sets.
-"""
-
 import argparse
 import csv
 import random
@@ -64,7 +58,6 @@ def _answer_overlap(expected: str, actual: str) -> float:
 
 
 def _by_alias(row: dict, aliases: tuple[str, ...], allow_empty: bool = False) -> str | None:
-    """First alias present in ``row``, stripped. ``allow_empty`` keeps blanks."""
     for key in aliases:
         value = row.get(key)
         if value is None:
@@ -76,7 +69,6 @@ def _by_alias(row: dict, aliases: tuple[str, ...], allow_empty: bool = False) ->
 
 
 def _normalize_csv_row(row: dict, mapping: dict | None = None) -> dict | None:
-    """Extract standard question, answer, and document_index from a CSV row."""
     question = None
     answer = None
     doc_index = None
@@ -115,7 +107,6 @@ def _normalize_csv_row(row: dict, mapping: dict | None = None) -> dict | None:
 
 
 def _resolve_csv_path(path_or_name: str | Path) -> Path:
-    """A usable path for a suite named by path, upload id, or filename."""
     try:
         return resolve_test_file_path(str(path_or_name))
     except FileNotFoundError:
@@ -151,7 +142,6 @@ def _load_csv(
 
 
 def _run(query: str, model: str) -> dict:
-    """Invoke the graph, reduced to the JSON-serialisable fields eval needs."""
     result = graph.invoke({"query": query, "model": model})
     return {
         "answer": result["answer"],
@@ -168,7 +158,6 @@ def _run_suite(
     cache: ResultCache,
     model: str | None = None,
 ) -> list[dict]:
-    """Return one result dict per row, in row order, reusing cached answers."""
 
     def resolve(row: dict) -> dict:
         question = row["question"]

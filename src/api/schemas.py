@@ -1,5 +1,3 @@
-"""Pydantic request/response models for the API."""
-
 from pydantic import BaseModel, Field
 
 
@@ -9,7 +7,6 @@ class QueryRequest(BaseModel):
 
 
 class Citation(BaseModel):
-    """Where one grounded chunk came from. See src/ingestion/units.py."""
 
     file_id: str | None = None
     filename: str | None = None
@@ -17,8 +14,6 @@ class Citation(BaseModel):
     unit_index: int | None = None
     label: str | None = None
     url: str | None = None
-    # Column name -> value for the columns designated as this citation's
-    # source (explicitly at ingest, or via the id/url name heuristics).
     fields: dict[str, str] | None = None
 
 
@@ -40,7 +35,6 @@ class HistoryEntry(BaseModel):
     created_at: str
     query: str
     answer: str | None
-    # Pre-citation rows still carry bare URL strings here; see history.py.
     sources: list[str] = []
     citations: list[Citation] = []
     refused: bool | None
@@ -56,8 +50,6 @@ class IngestFileEntry(BaseModel):
     id: str
     created_at: str
     filename: str
-    # stored_path is deliberately absent: it is a server filesystem path, and
-    # the browser addresses documents by id through /api/documents instead.
     sha256: str
     size_bytes: int
     documents: int | None = None
@@ -67,7 +59,6 @@ class IngestFileEntry(BaseModel):
 
 
 class DocumentMeta(BaseModel):
-    """What a stored document is, before any of its text is fetched."""
 
     id: str
     filename: str
@@ -77,14 +68,12 @@ class DocumentMeta(BaseModel):
     size_bytes: int
     created_at: str
     chunks: int = 0
-    # CSV header, when the viewer can render the document as a table.
     columns: list[str] | None = None
     index_columns: list[str] | None = None
     citation_columns: list[str] | None = None
 
 
 class UnitEntry(BaseModel):
-    """One addressable piece of a document, as ingest read it."""
 
     index: int
     kind: str
@@ -101,7 +90,6 @@ class CompareRequest(BaseModel):
 
 
 class DirectCompareSide(BaseModel):
-    """The raw-model half of a comparison -- no retrieval, no context."""
 
     answer: str
     latency_ms: float
@@ -110,8 +98,6 @@ class DirectCompareSide(BaseModel):
 
 
 class GroundedCompareSide(BaseModel):
-    """The RAG-grounded half of a comparison -- same shape ``ask`` returns,
-    plus the timings ``ask_stream``'s done event carries."""
 
     answer: str
     citations: list[Citation] = []
@@ -123,8 +109,6 @@ class GroundedCompareSide(BaseModel):
 
 
 class CompareResponse(BaseModel):
-    """Same query, same model, retrieval on vs off -- side by side. Neither
-    side is written to query history."""
 
     model: str
     grounded: GroundedCompareSide

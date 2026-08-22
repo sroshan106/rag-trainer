@@ -1,9 +1,3 @@
-"""Host CPU/RAM/disk/GPU collectors for the System dashboard view.
-
-Streams server-side metrics over SSE. GPU telemetry uses NVML directly (via pynvml).
-Degrades gracefully when NVML is unavailable.
-"""
-
 import shutil
 import time
 
@@ -15,7 +9,7 @@ try:
     import pynvml
 
     _NVML_IMPORT_ERROR: Exception | None = None
-except Exception as exc:  # pragma: no cover
+except Exception as exc:
     pynvml = None
     _NVML_IMPORT_ERROR = exc
 
@@ -27,7 +21,6 @@ _nvml_last_fail_time: float | None = None
 
 
 def _ensure_nvml() -> bool:
-    """Initialize NVML, retrying after a cooldown if a prior attempt failed."""
     global _nvml_ready, _nvml_last_fail_time
     if _nvml_ready:
         return True
@@ -44,14 +37,13 @@ def _ensure_nvml() -> bool:
     except _NVMLError:
         _nvml_last_fail_time = time.monotonic()
         return False
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log("error", "NVML init raised unexpectedly", error=repr(exc))
         _nvml_last_fail_time = time.monotonic()
         return False
 
 
 def collect_gpu() -> list[dict] | None:
-    """One dict per GPU device, or None if NVML is unavailable on this host."""
     if not _ensure_nvml():
         return None
     try:
@@ -87,7 +79,7 @@ def collect_gpu() -> list[dict] | None:
     except _NVMLError as exc:
         log("warning", "GPU metrics unavailable: NVML query failed", error=str(exc))
         return None
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log("error", "GPU metrics collector raised unexpectedly", error=repr(exc))
         return None
 
@@ -103,7 +95,7 @@ def collect_cpu() -> dict:
 def _load_avg() -> list[float] | None:
     try:
         return list(psutil.getloadavg())
-    except (AttributeError, OSError):  # pragma: no cover - not available on Windows
+    except (AttributeError, OSError):
         return None
 
 
@@ -135,7 +127,6 @@ def collect_disk(path: str = "/") -> dict:
 
 
 def collect_all() -> dict:
-    """One frame of the metrics stream -- everything the System view renders."""
     frame = {
         "cpu": collect_cpu(),
         "memory": collect_memory(),

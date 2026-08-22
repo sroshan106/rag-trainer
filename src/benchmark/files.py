@@ -1,5 +1,3 @@
-"""Management of benchmark test suites and custom test files."""
-
 import csv
 import io
 import json
@@ -19,7 +17,7 @@ DOC_INDEX_COLUMNS = ("document_index", "doc_index", "doc_id", "index", "document
 
 
 class UnusableTestFile(ValueError):
-    """Raised when an uploaded test file cannot be parsed or used for benchmarking."""
+    pass
 
 
 def _find_column(fieldnames: list[str], aliases: tuple[str, ...]) -> str | None:
@@ -36,7 +34,6 @@ def inspect_test_csv(
     answer_col: str | None = None,
     doc_index_col: str | None = None,
 ) -> dict:
-    """Inspect CSV content and return metadata: questions count, suite_type, and column mapping."""
     if isinstance(file_content, bytes):
         try:
             text = file_content.decode("utf-8")
@@ -54,7 +51,6 @@ def inspect_test_csv(
 
     fieldnames = [f for f in reader.fieldnames if f is not None]
 
-    # Resolve question column
     q_col = None
     if question_col and question_col in fieldnames:
         q_col = question_col
@@ -68,7 +64,6 @@ def inspect_test_csv(
             f"No question column found (looked for one of: {expected}). Found columns: {found}"
         )
 
-    # Resolve answer column
     ans_col = None
     if answer_col is not None:
         if answer_col in fieldnames:
@@ -76,7 +71,6 @@ def inspect_test_csv(
     else:
         ans_col = _find_column(fieldnames, ANSWER_COLUMNS)
 
-    # Resolve doc index column
     doc_col = None
     if doc_index_col is not None:
         if doc_index_col in fieldnames:
@@ -127,7 +121,6 @@ def _save_manifest(entries: list[dict]) -> None:
 
 
 def get_uploaded_test_files() -> list[dict]:
-    """Every uploaded suite whose stored file still exists, pruning the rest."""
     manifest = _load_manifest()
     valid_entries = []
     changed = False
@@ -152,7 +145,6 @@ def save_uploaded_test_file(
     answer_col: str | None = None,
     doc_index_col: str | None = None,
 ) -> dict:
-    """Validate and store an uploaded test CSV file."""
     clean_filename = Path(filename or "test_questions.csv").name
     if not clean_filename.lower().endswith(".csv"):
         clean_filename += ".csv"
@@ -193,7 +185,6 @@ def save_uploaded_test_file(
 
 
 def get_test_file_entry(file_id_or_name_or_path: str) -> dict | None:
-    """Get metadata for a test file."""
     manifest = _load_manifest()
     target_str = str(file_id_or_name_or_path)
     for entry in manifest:
@@ -209,7 +200,6 @@ def get_test_file_entry(file_id_or_name_or_path: str) -> dict | None:
 
 
 def delete_test_file(file_id: str) -> dict:
-    """Delete a test suite by its ID or filename."""
     manifest = _load_manifest()
     found_idx = -1
     for idx, entry in enumerate(manifest):
@@ -228,13 +218,10 @@ def delete_test_file(file_id: str) -> dict:
 
 
 def resolve_test_file_path(file_id_or_name: str) -> Path:
-    """Resolve a test file ID or filename into its actual file Path."""
-    # Check if direct path exists
     candidate = Path(file_id_or_name)
     if candidate.is_file():
         return candidate
 
-    # Check uploads by id or filename
     manifest = _load_manifest()
     for entry in manifest:
         if entry["id"] == file_id_or_name or entry["filename"] == file_id_or_name:
@@ -242,7 +229,6 @@ def resolve_test_file_path(file_id_or_name: str) -> Path:
             if stored_path.is_file():
                 return stored_path
 
-    # Check upload dir directly
     upload_candidate = UPLOAD_DIR / file_id_or_name
     if upload_candidate.is_file():
         return upload_candidate

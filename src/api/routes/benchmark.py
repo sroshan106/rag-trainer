@@ -1,8 +1,3 @@
-"""The Benchmark view's backing routes.
-
-Wraps ``src.benchmark.runner.run_all`` as a background job.
-"""
-
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -62,14 +57,11 @@ def list_models() -> dict:
 
 @router.post("/compare", response_model=CompareResponse)
 def compare(body: CompareRequest) -> dict:
-    """Run the same query grounded (retrieval on) and direct (retrieval off)
-    against the same model, for seeing what retrieval/embedding actually
-    changes about the answer. Neither side touches query history."""
     model = validated_model(body.model)
     try:
         grounded = ask_compare(body.query, model=model)
         direct = ask_direct(body.query, model=model)
-    except Exception as exc:  # noqa: BLE001 - surfaced to the client as a 502
+    except Exception as exc:
         raise HTTPException(status_code=502, detail=f"comparison failed: {exc}") from exc
     return {"model": model, "grounded": grounded, "direct": direct}
 
@@ -86,7 +78,6 @@ def upload_test_file(
     answer_col: str | None = Form(None),
     doc_index_col: str | None = Form(None),
 ) -> dict:
-    """Upload a custom benchmark test CSV containing questions and optional answers/document indices."""
     original = Path(file.filename or "test_questions.csv").name
     if not original.lower().endswith(".csv"):
         raise HTTPException(status_code=415, detail="only .csv files are supported")
@@ -155,6 +146,5 @@ def benchmark_history() -> list[dict]:
 
 @router.get("/active", response_model=JobResponse | None)
 def active_benchmark() -> dict | None:
-    """Lets the view re-attach to a benchmark run in progress after a page reload."""
     job = runner.active("benchmark")
     return job.to_dict() if job else None

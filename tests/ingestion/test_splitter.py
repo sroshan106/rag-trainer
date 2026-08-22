@@ -18,8 +18,6 @@ def test_split_documents_respects_chunk_size():
 
     chunks = split_documents(docs, chunk_size=50, chunk_overlap=10)
 
-    # from_tiktoken_encoder counts in tokens, not chars, so allow slack
-    # for the splitter's boundary-snapping behavior.
     assert all(len(c.page_content) < 500 for c in chunks)
 
 

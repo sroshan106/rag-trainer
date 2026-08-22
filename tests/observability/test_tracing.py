@@ -53,7 +53,7 @@ def test_detail_attaches_fields_to_span():
 
 
 def test_detail_outside_span_is_noop():
-    tracing.detail(orphan=True)  # must not raise
+    tracing.detail(orphan=True)
 
 
 def test_nested_spans_keep_details_separate():

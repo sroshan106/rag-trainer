@@ -1,5 +1,3 @@
-"""History routes, with the store stubbed -- the store's own tests cover storage."""
-
 import pytest
 from fastapi.testclient import TestClient
 

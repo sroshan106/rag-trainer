@@ -1,5 +1,3 @@
-"""Ingest a CSV into the pgvector store. Run: python -m src.ingestion.pipeline path"""
-
 import argparse
 import sys
 from pathlib import Path
@@ -10,8 +8,6 @@ from src.ingestion.splitter import SPLITTERS, DEFAULT_SPLITTER, split_documents
 from src.vectorstore.lexical import ensure_index
 from src.vectorstore.store import build_vectorstore
 
-# Called with (fraction_complete, message). The API's job runner passes one in
-# so the Ingest view can show real stage progress; the CLI passes none.
 ProgressHook = Callable[[float, str], None]
 
 
@@ -24,12 +20,6 @@ def ingest(
     index_columns: list[str] | None = None,
     citation_columns: list[str] | None = None,
 ) -> dict:
-    """Load, split, and embed path, returning what was written.
-
-    ``file_id``/``filename`` identify the upload these chunks belong to, and
-    are stamped onto every chunk so a citation can name the document and open
-    it. The CLI leaves them unset -- it ingests paths that were never uploaded.
-    """
     def report(fraction: float, message: str) -> None:
         if progress:
             progress(fraction, message)
@@ -48,8 +38,6 @@ def ingest(
 
     report(0.3, f"embedding {len(chunks)} chunks")
 
-    # Embedding is the long pole, so batch progress is mapped across the 0.3 ->
-    # 0.95 span rather than leaving the bar parked at 30% for the whole run.
     def embed_progress(fraction: float, message: str) -> None:
         report(0.3 + 0.65 * fraction, message)
 

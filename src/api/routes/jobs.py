@@ -1,5 +1,3 @@
-"""Generic job status endpoints, shared by ingest and benchmark polling."""
-
 from fastapi import APIRouter, HTTPException
 
 from src.api.schemas import JobResponse
@@ -26,7 +24,6 @@ def get_job(job_id: str) -> dict:
 
 @router.post("/{job_id}/cancel", response_model=JobResponse)
 def cancel_job(job_id: str) -> dict:
-    """Ask a running job to stop and keep partial results."""
     job = runner.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")

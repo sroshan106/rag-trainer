@@ -6,7 +6,6 @@ from src.vectorstore import rerank
 
 
 class FakeCrossEncoder:
-    """Returns the logits it was constructed with, in pair order."""
 
     def __init__(self, logits):
         self.logits = logits
@@ -43,7 +42,6 @@ def test_truncates_to_k(monkeypatch):
 
 
 def test_every_candidate_is_scored_before_truncation(monkeypatch):
-    """Dropped candidates keep their score so a trace can explain the cut."""
     docs = _docs("a", "b", "c")
     _patch(monkeypatch, FakeCrossEncoder([3.0, 1.0, 2.0]))
 

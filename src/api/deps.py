@@ -1,12 +1,9 @@
-"""Shared route-level validation."""
-
 from fastapi import HTTPException
 
 from src.rag.model_policy import resolve_model
 
 
 def validated_model(model: str | None) -> str:
-    """The requested chat model, or a 422 naming what the caller can pick."""
     try:
         return resolve_model(model, check_installed=True)
     except ValueError as exc:
