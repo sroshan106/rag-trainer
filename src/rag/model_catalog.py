@@ -141,10 +141,6 @@ def rerankers_installed() -> list[str]:
     return [m for m in RERANK_CATALOG if m in cached]
 
 
-def reranker_installed(model: str = RERANK_MODEL) -> bool:
-    return model in rerankers_installed()
-
-
 def pull_ollama_model(model: str, on_progress, should_stop=None) -> None:
     if model not in _OLLAMA_PULLABLE and model != EMBED_MODEL:
         raise ValueError(f"{model!r} is not downloadable here: {list(_OLLAMA_PULLABLE)}")

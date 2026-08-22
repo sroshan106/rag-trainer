@@ -86,13 +86,14 @@ def stub_delete_chunks(monkeypatch):
 def stub_ingest(monkeypatch):
     calls = []
 
-    def fake(path, progress=None, splitter=None, file_id=None, filename=None):
+    def fake(path, progress=None, splitter=None, file_id=None, filename=None, **kwargs):
         calls.append(
             {
                 "path": str(path),
                 "splitter": splitter,
                 "file_id": file_id,
                 "filename": filename,
+                **kwargs,
             }
         )
         if progress:
@@ -303,7 +304,7 @@ def test_delete_refused_while_an_ingest_is_running(client, monkeypatch, file_sto
     monkeypatch.setattr(
         ingest_route,
         "ingest",
-        lambda path, progress=None, splitter=None, file_id=None, filename=None: (
+        lambda path, progress=None, splitter=None, file_id=None, filename=None, **kwargs: (
             release.wait(5),
             {"path": path},
         )[1],
@@ -332,7 +333,7 @@ def test_delete_refused_while_an_ingest_is_running(client, monkeypatch, file_sto
 def test_second_upload_is_refused_while_one_runs(client, monkeypatch, file_store):
     release = threading.Event()
 
-    def blocking(path, progress=None, splitter=None, file_id=None, filename=None):
+    def blocking(path, progress=None, splitter=None, file_id=None, filename=None, **kwargs):
         release.wait(5)
         return {"path": path, "documents": 0, "chunks": 0, "index_built": False}
 
@@ -353,7 +354,7 @@ def test_active_reports_the_running_job_then_nothing(client, monkeypatch, file_s
     monkeypatch.setattr(
         ingest_route,
         "ingest",
-        lambda path, progress=None, splitter=None, file_id=None, filename=None: (
+        lambda path, progress=None, splitter=None, file_id=None, filename=None, **kwargs: (
             release.wait(5),
             {"path": path},
         )[1],
@@ -378,7 +379,7 @@ def test_benchmark_default_workers_matches_the_measured_value():
 def test_upload_with_index_columns(client, monkeypatch, file_store):
     called_with = {}
 
-    def fake_ingest(path, progress=None, splitter=None, file_id=None, filename=None, index_columns=None):
+    def fake_ingest(path, progress=None, splitter=None, file_id=None, filename=None, index_columns=None, **kwargs):
         called_with["index_columns"] = index_columns
         return {"path": path, "documents": 1, "chunks": 1, "chunk_ids": ["c1"], "index_built": True}
 

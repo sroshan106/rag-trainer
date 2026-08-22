@@ -1,10 +1,8 @@
-import hashlib
 import json
 import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import BinaryIO
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
@@ -32,59 +30,24 @@ ingested_files = sa.Table(
     sa.Column("citation_columns", sa.JSON().with_variant(JSONB, "postgresql"), nullable=True),
 )
 
-_ADDED_COLUMNS = ("index_columns", "citation_columns")
-
-
 def _create_table(engine: sa.Engine) -> None:
     _metadata.create_all(engine, tables=[ingested_files])
-    with engine.begin() as conn:
-        try:
-            if engine.dialect.name == "postgresql":
-                for name in _ADDED_COLUMNS:
-                    conn.execute(
-                        sa.text(f"ALTER TABLE ingested_files ADD COLUMN IF NOT EXISTS {name} JSONB")
-                    )
-            elif engine.dialect.name == "sqlite":
-                cols = [
-                    row[1]
-                    for row in conn.execute(sa.text("PRAGMA table_info(ingested_files)"))
-                ]
-                for name in _ADDED_COLUMNS:
-                    if name not in cols:
-                        conn.execute(
-                            sa.text(f"ALTER TABLE ingested_files ADD COLUMN {name} JSON")
-                        )
-        except Exception:
-            pass
 
 
 def _engine(connection: str | None = None) -> sa.Engine:
     return get_engine(connection, init=_create_table)
 
 
-def hash_file(fileobj: BinaryIO, chunk_size: int = 1024 * 1024) -> str:
-    digest = hashlib.sha256()
-    for chunk in iter(lambda: fileobj.read(chunk_size), b""):
-        digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _row_to_dict(row) -> dict:
     chunk_ids = row.chunk_ids
     if isinstance(chunk_ids, str):
         chunk_ids = json.loads(chunk_ids)
-    index_columns = getattr(row, "index_columns", None)
+    index_columns = row.index_columns
     if isinstance(index_columns, str):
-        try:
-            index_columns = json.loads(index_columns)
-        except Exception:
-            pass
-    citation_columns = getattr(row, "citation_columns", None)
+        index_columns = json.loads(index_columns)
+    citation_columns = row.citation_columns
     if isinstance(citation_columns, str):
-        try:
-            citation_columns = json.loads(citation_columns)
-        except Exception:
-            pass
+        citation_columns = json.loads(citation_columns)
     return {
         "id": row.id,
         "created_at": row.created_at.isoformat(),

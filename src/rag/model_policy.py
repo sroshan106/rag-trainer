@@ -1,4 +1,4 @@
-from src.rag.model_catalog import CATALOG, list_installed
+from src.rag import model_catalog
 
 
 class ModelNotInstalledError(ValueError):
@@ -6,11 +6,11 @@ class ModelNotInstalledError(ValueError):
 
 
 def resolve_model(model: str | None, check_installed: bool = False) -> str:
-    if not model or model not in CATALOG:
-        raise ValueError(f"model is required -- choose one of {list(CATALOG)}")
+    if not model or model not in model_catalog.CATALOG:
+        raise ValueError(f"model is required -- choose one of {list(model_catalog.CATALOG)}")
 
     if check_installed:
-        installed = list_installed()
+        installed = model_catalog.list_installed()
         if model not in installed:
             if not installed:
                 raise ModelNotInstalledError(

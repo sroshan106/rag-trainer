@@ -1,4 +1,3 @@
-import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -14,15 +13,8 @@ from langchain_postgres import PGVector
 from src.config import get_settings
 from src.db.engine import get_engine
 
-_settings = get_settings()
-
 COLLECTION_NAME = "rag_chunks"
-EMBED_MODEL = _settings.embed_model
-OLLAMA_BASE_URL = _settings.ollama_base_url
-
-EMBED_BATCH_SIZE = _settings.embed_batch_size
-EMBED_WORKERS = _settings.embed_workers
-EMBED_RETRIES = _settings.embed_retries
+EMBED_MODEL = get_settings().embed_model
 
 ProgressHook = Callable[[float, str], None]
 
@@ -32,7 +24,7 @@ class EmbedModelNotInstalled(RuntimeError):
 
 
 def ollama_model_names() -> set[str]:
-    resp = httpx.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5.0)
+    resp = httpx.get(f"{get_settings().ollama_base_url}/api/tags", timeout=5.0)
     resp.raise_for_status()
     return {m["name"] for m in resp.json().get("models", [])}
 
@@ -46,22 +38,26 @@ def model_is_installed(model: str, names: set[str]) -> bool:
 
 
 def _require_embed_model() -> None:
-    if model_is_installed(EMBED_MODEL, ollama_model_names()):
+    embed_model = get_settings().embed_model
+    if model_is_installed(embed_model, ollama_model_names()):
         return
     raise EmbedModelNotInstalled(
-        f"Embedding model {EMBED_MODEL!r} is not installed. "
+        f"Embedding model {embed_model!r} is not installed. "
         "Download it from Settings > Embeddings before ingesting."
     )
 
 
 def _embeddings(num_gpu: int | None = None) -> OllamaEmbeddings:
+    s = get_settings()
     kwargs = {} if num_gpu is None else {"num_gpu": num_gpu}
-    return OllamaEmbeddings(model=EMBED_MODEL, base_url=OLLAMA_BASE_URL, **kwargs)
+    return OllamaEmbeddings(model=s.embed_model, base_url=s.ollama_base_url, **kwargs)
 
 
 def _embed_batch(
-    embeddings: OllamaEmbeddings, texts: list[str], retries: int = EMBED_RETRIES
+    embeddings: OllamaEmbeddings, texts: list[str], retries: int | None = None
 ) -> list[list[float]]:
+    if retries is None:
+        retries = get_settings().embed_retries
     delay = 1.0
     failure: Exception | None = None
     for attempt in range(retries):
@@ -88,12 +84,13 @@ def build_vectorstore(
     progress: ProgressHook | None = None,
     batch_size: int | None = None,
 ) -> list[str]:
-    connection = connection or os.environ["DATABASE_URL"]
+    connection = connection or get_settings().database_url
     ids = ids or [str(uuid.uuid4()) for _ in chunks]
     if not chunks:
         return ids
 
-    batch_size = batch_size or EMBED_BATCH_SIZE
+    s = get_settings()
+    batch_size = batch_size or s.embed_batch_size
     _require_embed_model()
     embeddings = _embeddings(num_gpu=999)
     vectorstore = PGVector(
@@ -118,7 +115,7 @@ def build_vectorstore(
         return _embed_batch(embeddings, unique_texts[start : start + batch_size])
 
     done = 0
-    with ThreadPoolExecutor(max_workers=max(1, EMBED_WORKERS)) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, s.embed_workers)) as pool:
         for start, vectors in zip(starts, pool.map(embed, starts)):
             batch = unique_texts[start : start + batch_size]
             rows = [
@@ -139,7 +136,7 @@ def build_vectorstore(
 
 
 def load_vectorstore(connection: str | None = None) -> PGVector:
-    connection = connection or os.environ["DATABASE_URL"]
+    connection = connection or get_settings().database_url
     return PGVector(
         embeddings=_embeddings(num_gpu=0),
         collection_name=COLLECTION_NAME,

@@ -21,7 +21,6 @@ const postJson = (path, data) => request(path, { method: "POST", body: JSON.stri
 const postForm = (path, form) => request(path, { method: "POST", body: form });
 const del = (path) => request(path, { method: "DELETE" });
 
-export const runQuery = (query, model = null) => postJson("/query", { query, model });
 export const queryModels = () => request("/query/models");
 export const collectionStatus = () => request("/query/collection");
 
@@ -118,7 +117,6 @@ export const listModelCatalog = () => request("/models");
 export const pullModel = (model) => postJson("/models/pull", { model });
 export const pullHistory = () => request("/models/pull/history");
 export const deleteModel = (model) => del(`/models/${encodeURIComponent(model)}`);
-export const getMetrics = () => request("/metrics");
 export const getLogs = (limit = 100) => request(`/metrics/logs?limit=${limit}`);
 
 const TERMINAL_STATUSES = ["done", "failed", "cancelled"];

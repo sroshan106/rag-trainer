@@ -38,6 +38,10 @@ class FakeLLM:
         self.last_prompt = prompt
         return FakeResponse(self.content)
 
+    def stream(self, prompt):
+        self.last_prompt = prompt
+        yield FakeResponse(self.content)
+
 
 def _no_lexical_hits(monkeypatch):
     monkeypatch.setattr(retrieve.hybrid.lexical, "search", lambda query, k, connection=None: [])

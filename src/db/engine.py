@@ -1,8 +1,9 @@
-import os
 import threading
 from typing import Callable
 
 import sqlalchemy as sa
+
+from src.config import get_settings
 
 _engines: dict[str, sa.Engine] = {}
 _initialized: set[tuple[str, Callable[[sa.Engine], None]]] = set()
@@ -13,7 +14,7 @@ def get_engine(
     url: str | None = None,
     init: Callable[[sa.Engine], None] | None = None,
 ) -> sa.Engine:
-    url = url or os.environ["DATABASE_URL"]
+    url = url or get_settings().database_url
 
     engine = _engines.get(url)
     if engine is not None and (init is None or (url, init) in _initialized):

@@ -26,7 +26,7 @@ def _wait_for_job(job_id: str, timeout: float = 5.0) -> dict:
 
 
 def test_ingest_runs_as_background_job_and_reports_counts(monkeypatch, tmp_path):
-    def fake_ingest(path, progress=None, splitter=None, file_id=None, filename=None):
+    def fake_ingest(path, progress=None, splitter=None, file_id=None, filename=None, **kwargs):
         if progress:
             progress(0.5, "embedding")
         return {
@@ -43,7 +43,7 @@ def test_ingest_runs_as_background_job_and_reports_counts(monkeypatch, tmp_path)
     monkeypatch.setattr("src.api.routes.ingest.file_history.find_by_hash", lambda sha256: None)
     monkeypatch.setattr(
         "src.api.routes.ingest.file_history.record",
-        lambda filename, stored_path, sha256, size_bytes, documents=None: str(uuid.uuid4()),
+        lambda filename, stored_path, sha256, size_bytes, documents=None, **kwargs: str(uuid.uuid4()),
     )
     monkeypatch.setattr(
         "src.api.routes.ingest.file_history.set_chunk_ids",

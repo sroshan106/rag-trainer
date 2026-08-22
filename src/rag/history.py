@@ -27,7 +27,6 @@ query_history = sa.Table(
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, index=True),
     sa.Column("query", sa.Text, nullable=False),
     sa.Column("answer", sa.Text, nullable=True),
-    sa.Column("sources", JSONB, nullable=True),
     sa.Column("citations", JSONB, nullable=True),
     sa.Column("refused", sa.Boolean, nullable=True),
     sa.Column("confidence", sa.Float, nullable=True),
@@ -42,26 +41,8 @@ def history_enabled() -> bool:
     return env_flag("RAG_HISTORY", default=True)
 
 
-def _migrate(engine: sa.Engine) -> None:
-    statements = [
-        "ALTER TABLE query_history ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'done'",
-        "ALTER TABLE query_history ALTER COLUMN answer DROP NOT NULL",
-        "ALTER TABLE query_history ALTER COLUMN sources DROP NOT NULL",
-        "ALTER TABLE query_history ALTER COLUMN refused DROP NOT NULL",
-        "ALTER TABLE query_history ADD COLUMN IF NOT EXISTS rerank_ms DOUBLE PRECISION",
-        "ALTER TABLE query_history ADD COLUMN IF NOT EXISTS generate_ms DOUBLE PRECISION",
-        "ALTER TABLE query_history ADD COLUMN IF NOT EXISTS citations JSONB",
-        "ALTER TABLE query_history ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION",
-    ]
-    with engine.begin() as conn:
-        for statement in statements:
-            conn.execute(sa.text(statement))
-
-
 def _create_table(engine: sa.Engine) -> None:
     _metadata.create_all(engine, tables=[query_history])
-    if engine.dialect.name == "postgresql":
-        _migrate(engine)
 
 
 def _engine(connection: str | None = None) -> sa.Engine:
@@ -147,7 +128,6 @@ def _row_to_dict(row) -> dict:
         "created_at": row.created_at.isoformat(),
         "query": row.query,
         "answer": row.answer,
-        "sources": _decode(row.sources) or [],
         "citations": _decode(row.citations) or [],
         "refused": row.refused,
         "confidence": row.confidence,

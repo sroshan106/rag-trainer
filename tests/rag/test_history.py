@@ -34,8 +34,7 @@ def db(tmp_path, monkeypatch):
     url = f"sqlite:///{tmp_path / 'history.db'}"
     monkeypatch.setattr(db_engine, "_engines", {})
     monkeypatch.setattr(db_engine, "_initialized", set())
-    for column in (history.query_history.c.sources, history.query_history.c.citations):
-        monkeypatch.setattr(column, "type", sa.JSON(), raising=False)
+    monkeypatch.setattr(history.query_history.c.citations, "type", sa.JSON(), raising=False)
     monkeypatch.setenv("DATABASE_URL", url)
     return url
 

@@ -143,7 +143,7 @@ export default function Exchange({
         </div>
       )}
 
-      <SourceList citations={entry.citations} sources={entry.sources} />
+      <SourceList citations={entry.citations} />
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-hairline pt-3 text-xs">
         <Timing entry={entry} />

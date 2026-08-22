@@ -1,4 +1,3 @@
-import io
 
 import pytest
 import sqlalchemy as sa
@@ -17,16 +16,6 @@ def db(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("DATABASE_URL", url)
     return url
-
-
-def test_hash_file_is_stable_for_the_same_bytes():
-    assert files.hash_file(io.BytesIO(b"hello world")) == files.hash_file(
-        io.BytesIO(b"hello world")
-    )
-
-
-def test_hash_file_differs_for_different_bytes():
-    assert files.hash_file(io.BytesIO(b"a")) != files.hash_file(io.BytesIO(b"b"))
 
 
 def test_record_then_find_by_hash(db):

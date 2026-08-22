@@ -35,7 +35,6 @@ class HistoryEntry(BaseModel):
     created_at: str
     query: str
     answer: str | None
-    sources: list[str] = []
     citations: list[Citation] = []
     refused: bool | None
     confidence: float | None = None
@@ -152,9 +151,3 @@ class JobResponse(BaseModel):
     params: dict | None = None
     created_at: float
     updated_at: float
-
-
-class IngestResponse(BaseModel):
-    documents: int | None = None
-    chunks: int | None = None
-    stdout: str

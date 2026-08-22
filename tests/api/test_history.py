@@ -9,7 +9,7 @@ ENTRY = {
     "created_at": "2026-08-19T12:00:00+00:00",
     "query": "who said it?",
     "answer": "Ruby did.",
-    "sources": ["http://example.com/a"],
+    "citations": [],
     "refused": False,
     "latency_ms": 12.5,
     "model": "llama3.2:3b",
@@ -27,7 +27,7 @@ def test_list_returns_entries(client, monkeypatch):
     body = client.get("/api/history").json()
 
     assert body[0]["query"] == "who said it?"
-    assert body[0]["sources"] == ["http://example.com/a"]
+    assert body[0]["citations"] == []
 
 
 def test_limit_is_passed_through_and_bounded(client, monkeypatch):

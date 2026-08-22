@@ -1,24 +1,14 @@
 import { useState } from "react";
-import { ExternalLink, FileText } from "lucide-react";
+import { FileText } from "lucide-react";
 import DocumentModal from "./DocumentModal.jsx";
 
-function hostnameOf(url) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-}
-
-
-export default function SourceList({ citations, sources, title = "Sources", compact = false }) {
+export default function SourceList({ citations, title = "Sources", compact = false }) {
   const [open, setOpen] = useState(null);
 
-  const entries = (citations?.length ? citations : sources || []).map((entry, i) =>
-    typeof entry === "string"
-      ? { legacyUrl: entry, key: `legacy-${i}` }
-      : { ...entry, key: `${entry.file_id}-${entry.unit_index}-${i}` }
-  );
+  const entries = (citations || []).map((entry, i) => ({
+    ...entry,
+    key: `${entry.file_id}-${entry.unit_index}-${i}`,
+  }));
 
   if (entries.length === 0) return null;
 
@@ -43,23 +33,6 @@ export default function SourceList({ citations, sources, title = "Sources", comp
               [{i + 1}]
             </span>
           );
-
-          if (entry.legacyUrl) {
-            return (
-              <a
-                key={entry.key}
-                href={entry.legacyUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-                title={entry.legacyUrl}
-                className={`${chip} text-accent hover:text-accent hover:bg-surface-2 hover:border-hairline`}
-              >
-                {number}
-                <span className="truncate max-w-xs">{hostnameOf(entry.legacyUrl)}</span>
-                <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
-              </a>
-            );
-          }
 
           const fieldEntries = Object.entries(entry.fields || {});
           const fieldSummary = fieldEntries.map(([k, v]) => `${k}: ${v}`).join(", ");
